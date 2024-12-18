@@ -323,6 +323,8 @@ def learner_setup(
     # Get number of actions.
     num_actions = int(env.action_spec().shape[-1])
     config.system.action_dim = num_actions
+    print(env.action_spec())
+    print(env.action_spec().minimum)
     config.system.action_minimum = float(env.action_spec().minimum)
     config.system.action_maximum = float(env.action_spec().maximum)
 
@@ -591,10 +593,12 @@ def hydra_entry_point(cfg: DictConfig) -> float:
     """Experiment entry point."""
     # Allow dynamic attributes.
     OmegaConf.set_struct(cfg, False)
-
-    # Run experiment.
-    eval_performance = run_experiment(cfg)
-    print(f"{Fore.CYAN}{Style.BRIGHT}PPO experiment completed{Style.RESET_ALL}")
+    for i in range(5):
+        print(cfg)
+        cfg.arch.seed = cfg.arch.seed + i * 100
+        # Run experiment.
+        eval_performance = run_experiment(cfg)
+        print(f"{Fore.CYAN}{Style.BRIGHT}PPO experiment completed{Style.RESET_ALL}")
     return eval_performance
 
 

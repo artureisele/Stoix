@@ -13,6 +13,7 @@ import xminigrid
 from brax.envs import _envs as brax_environments
 from brax.envs import create as brax_make
 from gymnax import registered_envs as gymnax_environments
+from stoix.custom_envs import register as custom_register
 from jaxmarl.environments.smax import map_name_to_scenario
 from jaxmarl.registration import registered_envs as jaxmarl_environments
 from jumanji.env import Environment
@@ -77,6 +78,30 @@ def make_jumanji_env(
 
     return env, eval_env
 
+
+def make_custom_env(env_name: str, config: DictConfig) -> Tuple[Environment, Environment]:
+    """
+    Create a Custo environments for training and evaluation.
+
+    Args:
+        env_name (str): The name of the environment to create.
+        config (Dict): The configuration of the environment.
+
+    Returns:
+        A tuple of the environments.
+    """
+    # Config generator and select the wrapper.
+    # Create envs.
+    env, env_params = custom_register.make(env_name, **config.env.kwargs)
+    eval_env, eval_env_params = custom_register.make(env_name, **config.env.kwargs)
+    eval_env_params = eval_env.eval_params
+    env = GymnaxWrapper(env, env_params)
+    eval_env = GymnaxWrapper(eval_env, eval_env_params)
+
+    env = AutoResetWrapper(env, next_obs_in_extras=True)
+    env = RecordEpisodeMetrics(env)
+
+    return env, eval_env
 
 def make_gymnax_env(env_name: str, config: DictConfig) -> Tuple[Environment, Environment]:
     """
@@ -399,7 +424,9 @@ def make(config: DictConfig) -> Tuple[Environment, Environment]:
     """
     env_name = config.env.scenario.name
 
-    if env_name in gymnax_environments:
+    if env_name in custom_register.registered_envs:
+        envs = make_custom_env(env_name, config)
+    elif env_name in gymnax_environments:
         envs = make_gymnax_env(env_name, config)
     elif env_name in JUMANJI_REGISTRY:
         envs = make_jumanji_env(env_name, config)

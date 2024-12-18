@@ -3,7 +3,7 @@ defaults:
   - arch: anakin
   - system: sac/ff_sac
   - network: mlp_sac
-  - env: brax/ant
+  - env: custom/cartpole_hyperplane
   - _self_
 
 hydra:

@@ -2,11 +2,15 @@ import copy
 import time
 from typing import Any, Callable, Dict, Tuple
 
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import wandb
 import chex
 import flashbax as fbx
 import flax
 import hydra
 import jax
+import math
 import jax.numpy as jnp
 import optax
 import rlax
@@ -86,6 +90,10 @@ def get_warmup_fn(
 
             # STEP ENVIRONMENT
             env_state, timestep = jax.vmap(env.step, in_axes=(0, 0))(env_state, action)
+            #jax.debug.print("Start !!!!!!!!!!!!")
+            #jax.debug.print("{}", params.actor_params.online)
+            #jax.debug.print("End !!!!!!!!!!!!")
+            
 
             # LOG EPISODE METRICS
             done = timestep.last().reshape(-1)
@@ -541,6 +549,7 @@ def run_experiment(_config: DictConfig) -> float:
 
     # Calculate total timesteps.
     n_devices = len(jax.devices())
+    print(f"Devices{n_devices}")
     config.num_devices = n_devices
     config = check_total_timesteps(config)
     assert (
@@ -559,6 +568,7 @@ def run_experiment(_config: DictConfig) -> float:
     learn, actor_network, learner_state = learner_setup(
         env, (key, actor_net_key, q_net_key), config
     )
+    #jax.debug.print("{}", actor_network)
 
     # Setup evaluator.
     evaluator, absolute_metric_evaluator, (trained_params, eval_keys) = evaluator_setup(
@@ -596,6 +606,7 @@ def run_experiment(_config: DictConfig) -> float:
 
     # Run experiment for a total number of evaluations.
     max_episode_return = jnp.float32(-1e7)
+    #jax.debug.print("{}", chex.tree_structure(learner_state.params.actor_params))
     best_params = unreplicate_batch_dim(learner_state.params.actor_params.online)
     for eval_step in range(config.arch.num_evaluation):
         # Train.
@@ -641,6 +652,25 @@ def run_experiment(_config: DictConfig) -> float:
 
         steps_per_eval = int(jnp.sum(evaluator_output.episode_metrics["episode_length"]))
         evaluator_output.episode_metrics["steps_per_second"] = steps_per_eval / elapsed_time
+
+        ev = evaluator_output.episode_metrics
+        fig = plt.figure(figsize=(8, 8), clear=True, num=0)
+        ax = fig.add_subplot(111)
+        rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
+                            linewidth=2, edgecolor='green', facecolor='white')
+        ax.add_patch(rectangle)
+        quiver_plot = ax.quiver(ev["x_grid"], ev["z_grid"], ev["arrowDirX"], ev["arrowDirY"], ev["threshold"], cmap="viridis",
+                                angles="xy", scale_units="xy", scale=25)
+        # Set the plot boundaries
+        plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
+        plt.colorbar(quiver_plot, label="Safe actions from value in direction of arrow")
+        plt.xlabel("X")
+        plt.ylabel("Theta")
+        plt.title("Cartpole Border Decisions")
+        # Show the plot
+        img = wandb.Image(plt)
+        #wandb.log({"test":img})
+        evaluator_output.episode_metrics["Image"] = img
         logger.log(evaluator_output.episode_metrics, t, eval_step, LogEvent.EVAL)
 
         if save_checkpoint:
@@ -691,11 +721,14 @@ def hydra_entry_point(cfg: DictConfig) -> float:
     """Experiment entry point."""
     # Allow dynamic attributes.
     OmegaConf.set_struct(cfg, False)
+    for i in range(5):
+        print(cfg)
+        cfg.arch.seed = cfg.arch.seed + i * 100
 
-    # Run experiment.
-    eval_performance = run_experiment(cfg)
+        # Run experiment.
+        eval_performance = run_experiment(cfg)
 
-    print(f"{Fore.CYAN}{Style.BRIGHT}TD3 experiment completed{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{Style.BRIGHT}TD3 experiment completed{Style.RESET_ALL}")
     return eval_performance
 
 

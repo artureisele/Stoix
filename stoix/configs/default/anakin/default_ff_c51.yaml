@@ -3,7 +3,7 @@ defaults:
   - arch: anakin
   - system: q_learning/ff_c51
   - network: mlp_c51
-  - env: gymnax/cartpole
+  - env: custom/cartpole_hyperplane
   - _self_
 
 hydra:

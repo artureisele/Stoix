@@ -14,7 +14,7 @@ tau: 0.005  # smoothing coefficient for target networks
 gamma: 0.99  # discount factor
 max_grad_norm: 0.5 # Maximum norm of the gradients for a weight update.
 decay_learning_rates: True # Whether learning rates should be linearly decayed during training.
-max_abs_reward : 20_000  # maximum absolute reward value
+max_abs_reward : 100  # maximum absolute reward value
 exploration_noise : 0.15  # standard deviation of the exploration noise
 policy_noise: 0.2 # standard deviation of the policy noise
 policy_frequency: 2 # frequency of the policy update in the TD3 algorithm (delayed policy update)

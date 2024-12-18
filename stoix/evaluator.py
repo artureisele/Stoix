@@ -12,6 +12,10 @@ from flax.core.frozen_dict import FrozenDict
 from jumanji.env import Environment
 from omegaconf import DictConfig
 
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+
 from stoix.base_types import (
     ActFn,
     ActorApply,
@@ -23,6 +27,7 @@ from stoix.base_types import (
     RNNEvalState,
     RNNObservation,
     SebulbaEvalFn,
+    Observation
 )
 from stoix.utils.env_factory import EnvFactory
 from stoix.utils.jax_utils import unreplicate_batch_dim
@@ -158,13 +163,80 @@ def get_ff_evaluator_fn(
             step_count=jnp.zeros((eval_batch, 1)),
             episode_return=jnp.zeros_like(timesteps.reward),
         )
-
+        #jax.debug.print("{}", eval_state)
+        #jax.debug.print("{}", eval_state.shape)
         eval_metrics = jax.vmap(
             eval_one_episode,
             in_axes=(None, 0),
             axis_name="eval_batch",
         )(trained_params, eval_state)
 
+
+        safe_radians = 24 * 2 * math.pi / 360
+        x_range = jnp.arange(-4.8, 4.9, 0.2)  # First dimension: -2.4 to 2.4
+        z_range = jnp.arange(-2*safe_radians, 2*safe_radians, math.pi / 360 *8)  # Third dimension: -2 to 2
+        # Create the grid for first and third dimensions
+        x_grid, z_grid = jnp.meshgrid(x_range, z_range)
+
+        agent_view_flat = jnp.stack([
+            x_grid.flatten(),  # First dimension
+            jnp.zeros_like(x_grid).flatten(),  # Second dimension (zeros)
+            z_grid.flatten(),  # Third dimension
+            jnp.zeros_like(z_grid).flatten()   # Fourth dimension (zeros)
+        ], axis=-1)
+        observation2 = Observation(
+            agent_view=agent_view_flat,
+            action_mask=jnp.array([True, True]),
+            step_count=jnp.array(0)
+        )
+        action2 = act_fn(
+            trained_params,
+            jax.tree_util.tree_map(lambda x: x[jnp.newaxis, ...], observation2),
+            step_keys,
+        )
+        #jax.debug.print("{}", action2.shape)
+        safe_x = 2.4
+        action2 = jnp.squeeze(action2)
+        # Create the figure and axes for the plot
+        fig = plt.figure(figsize=(8, 8))
+        ax = fig.add_subplot(111)
+        a_h = action2[:,0]/jnp.abs(action2[:,0])
+        #jax.debug.print("ah{}", a_h[0])
+        #jax.debug.print("{}", a_h.shape)
+        threshold = jnp.clip(action2[:,1] / a_h, -1, 1)
+        #jax.debug.print("bh{}", action2[0,1])
+        #jax.debug.print("th{}", threshold[0])
+        #jax.debug.print("{}", threshold.shape)
+        arrowDirY = 1-((a_h<0)*2) 
+        #jax.debug.print("{}", arrowDirY)
+        #jax.debug.print("{}", arrowDirY.shape)
+        arrowDirX = jnp.zeros_like(arrowDirY).flatten()
+        #jax.debug.print("{}", arrowDirX)
+        #jax.debug.print("{}", arrowDirX.shape)
+        # Plot the rectangle representing the simulation boundaries
+        ##rectangle = patches.Rectangle((-safe_x, -safe_radians), 2 * safe_x, 2 * safe_radians,
+        #                            linewidth=2, edgecolor='green', facecolor='white')
+        #ax.add_patch(rectangle)
+        #convert_to_numpy = jax.pure_callback(lambda x: jnp.asarray(x), x_grid, jnp.float32)
+        #threshold_np = convert_to_numpy(threshold)
+        #print(threshold_np)
+        #print(type(threshold_np))
+        # Create the quiver plot
+        #quiver_plot = ax.quiver(x_grid, z_grid, arrowDirX, arrowDirY, threshold, cmap="viridis",
+        #                        angles="xy", scale_units="xy", scale=25)
+        # Set the plot boundaries
+        #plt.axis([-2 * safe_x, 2 * safe_x, -2 * safe_radians, 2 * safe_radians])
+        #plt.colorbar(quiver_plot, label="Safe actions from value in direction of arrow")
+        #plt.xlabel("X")
+        #plt.ylabel("Theta")
+        #plt.title("Cartpole Border Decisions")
+        # Show the plot
+        #plt.show()
+        eval_metrics["x_grid"] = x_grid
+        eval_metrics["z_grid"] = z_grid
+        eval_metrics["arrowDirX"] = arrowDirX
+        eval_metrics["arrowDirY"] = arrowDirY
+        eval_metrics["threshold"] = threshold
         return EvaluationOutput(
             learner_state=eval_state,
             episode_metrics=eval_metrics,

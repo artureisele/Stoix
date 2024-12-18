@@ -177,3 +177,6 @@ outputs/
 multirun/
 .neptune
 .wandb
+.wandb/
+wandb
+wandb/
