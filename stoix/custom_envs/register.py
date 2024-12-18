@@ -1,7 +1,7 @@
-from stoix.custom_envs.cartpole_hyperplane import CartPole
+from stoix.custom_envs.cartpole_hyperplane import CartPole as CartPoleSafe
+from stoix.custom_envs.cartpole_perf import CartPole as CartPolePerf
 
-registered_envs = ["CartPoleHyperplane"]
-
+registered_envs = ["CartPoleHyperplane", "CartPolePerf"]
 def make(env_id: str, **env_kwargs):
     """A JAX-version of OpenAI's infamous env.make(env_name).
 
@@ -19,5 +19,7 @@ def make(env_id: str, **env_kwargs):
 
     # 1. Classic OpenAI Control Tasks
     if env_id == "CartPoleHyperplane":
-        env = CartPole(**env_kwargs)
+        env = CartPoleSafe(**env_kwargs)
+    if env_id == "CartPolePerf":
+        env = CartPolePerf(**env_kwargs)
     return env, env.default_params

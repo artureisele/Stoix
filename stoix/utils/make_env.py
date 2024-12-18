@@ -1,6 +1,6 @@
 import copy
 from typing import Tuple
-
+import jax
 import gymnax
 import hydra
 import jax.numpy as jnp
@@ -81,7 +81,7 @@ def make_jumanji_env(
 
 def make_custom_env(env_name: str, config: DictConfig) -> Tuple[Environment, Environment]:
     """
-    Create a Custo environments for training and evaluation.
+    Create a custom environments for training and evaluation.
 
     Args:
         env_name (str): The name of the environment to create.
@@ -423,8 +423,9 @@ def make(config: DictConfig) -> Tuple[Environment, Environment]:
         training and evaluation environments.
     """
     env_name = config.env.scenario.name
-
-    if env_name in custom_register.registered_envs:
+    jax.debug.print("{}",env_name)
+    jax.debug.print("{}",custom_register.registered_envs)
+    if env_name in ["CartPoleHyperplane", "CartPolePerf"]:
         envs = make_custom_env(env_name, config)
     elif env_name in gymnax_environments:
         envs = make_gymnax_env(env_name, config)
