@@ -532,6 +532,9 @@ def learner_setup(
 
     # Initialise learner state.
     params, opt_states, buffer_states = replicate_learner
+    #jax.debug.print("Test123")
+    #jax.debug.print("{}", jax.tree.map(lambda x: jnp.shape(x), params.actor_params.online))
+    #jax.debug.print("Test123")
     # Warmup the buffer.
     env_states, timesteps, keys, buffer_states = warmup(
         env_states, timesteps, buffer_states, warmup_keys
@@ -606,8 +609,13 @@ def run_experiment(_config: DictConfig) -> float:
 
     # Run experiment for a total number of evaluations.
     max_episode_return = jnp.float32(-1e7)
-    #jax.debug.print("{}", chex.tree_structure(learner_state.params.actor_params))
+    
+    #jax.debug.print("Test123")
+    #jax.debug.print("{}", jax.tree.map(lambda x: jnp.shape(x), learner_state.params.actor_params.online))
+    #jax.debug.print("Test123")
     best_params = unreplicate_batch_dim(learner_state.params.actor_params.online)
+    #jax.debug.print("{}", chex.tree_structure(best_params))
+    #jax.debug.print("Test123")
     for eval_step in range(config.arch.num_evaluation):
         # Train.
         start_time = time.time()
@@ -652,7 +660,7 @@ def run_experiment(_config: DictConfig) -> float:
 
         steps_per_eval = int(jnp.sum(evaluator_output.episode_metrics["episode_length"]))
         evaluator_output.episode_metrics["steps_per_second"] = steps_per_eval / elapsed_time
-
+        """
         ev = evaluator_output.episode_metrics
         fig = plt.figure(figsize=(8, 8), clear=True, num=0)
         ax = fig.add_subplot(111)
@@ -671,6 +679,7 @@ def run_experiment(_config: DictConfig) -> float:
         img = wandb.Image(plt)
         #wandb.log({"test":img})
         evaluator_output.episode_metrics["Image"] = img
+        """
         logger.log(evaluator_output.episode_metrics, t, eval_step, LogEvent.EVAL)
 
         if save_checkpoint:
@@ -721,7 +730,7 @@ def hydra_entry_point(cfg: DictConfig) -> float:
     """Experiment entry point."""
     # Allow dynamic attributes.
     OmegaConf.set_struct(cfg, False)
-    for i in range(5):
+    for i in range(1):
         print(cfg)
         cfg.arch.seed = cfg.arch.seed + i * 100
 

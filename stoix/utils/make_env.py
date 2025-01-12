@@ -79,7 +79,7 @@ def make_jumanji_env(
     return env, eval_env
 
 
-def make_custom_env(env_name: str, config: DictConfig) -> Tuple[Environment, Environment]:
+def make_custom_env(env_name: str, config: DictConfig, custom_extras: dict={}) -> Tuple[Environment, Environment]:
     """
     Create a custom environments for training and evaluation.
 
@@ -92,8 +92,8 @@ def make_custom_env(env_name: str, config: DictConfig) -> Tuple[Environment, Env
     """
     # Config generator and select the wrapper.
     # Create envs.
-    env, env_params = custom_register.make(env_name, **config.env.kwargs)
-    eval_env, eval_env_params = custom_register.make(env_name, **config.env.kwargs)
+    env, env_params = custom_register.make(env_name, **config.env.kwargs, **custom_extras)
+    eval_env, eval_env_params = custom_register.make(env_name, **config.env.kwargs,**custom_extras)
     eval_env_params = eval_env.eval_params
     env = GymnaxWrapper(env, env_params)
     eval_env = GymnaxWrapper(eval_env, eval_env_params)
@@ -412,7 +412,7 @@ def make_envpool_factory(env_name: str, config: DictConfig) -> EnvPoolFactory:
     return env_factory
 
 
-def make(config: DictConfig) -> Tuple[Environment, Environment]:
+def make(config: DictConfig, custom_extras:dict = {}) -> Tuple[Environment, Environment]:
     """
     Create environments for training and evaluation..
 
@@ -423,10 +423,9 @@ def make(config: DictConfig) -> Tuple[Environment, Environment]:
         training and evaluation environments.
     """
     env_name = config.env.scenario.name
-    jax.debug.print("{}",env_name)
-    jax.debug.print("{}",custom_register.registered_envs)
-    if env_name in ["CartPoleHyperplane", "CartPolePerf"]:
-        envs = make_custom_env(env_name, config)
+
+    if env_name in custom_register.registered_envs:
+        envs = make_custom_env(env_name, config, custom_extras)
     elif env_name in gymnax_environments:
         envs = make_gymnax_env(env_name, config)
     elif env_name in JUMANJI_REGISTRY:

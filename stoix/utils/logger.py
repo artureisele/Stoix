@@ -20,6 +20,16 @@ from tensorboard_logger import configure, log_value
 
 
 class LogEvent(Enum):
+    ACT_SAFE = "actor_safe"
+    TRAIN_SAFE = "trainer_safe"
+    EVAL_SAFE = "evaluator_safe"
+    ABSOLUTE_SAFE = "absolute_safe"
+    MISC_SAFE = "misc_safe"
+    ACT_Perf = "actor_perf"
+    TRAIN_Perf = "trainer_perf"
+    EVAL_Perf = "evaluator_perf"
+    ABSOLUTE_Perf = "absolute_perf"
+    MISC_Perf = "misc_perf"
     ACT = "actor"
     TRAIN = "trainer"
     EVAL = "evaluator"

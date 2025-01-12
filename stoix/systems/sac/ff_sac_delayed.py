@@ -1,23 +1,14 @@
 import copy
 import time
-import os
-import sys
 from typing import Any, Callable, Dict, Tuple
-new_project_path = os.path.dirname(os.path.abspath(__file__))
-if new_project_path not in sys.path:
-    sys.path.insert(0, new_project_path)
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import wandb
+
 import chex
 import flashbax as fbx
 import flax
 import hydra
 import jax
-import math
 import jax.numpy as jnp
 import optax
-import rlax
 from colorama import Fore, Style
 from flashbax.buffers.trajectory_buffer import BufferState
 from flax.core.frozen_dict import FrozenDict
@@ -32,7 +23,6 @@ from stoix.base_types import (
     ContinuousQApply,
     LearnerFn,
     LogEnvState,
-    Observation,
     OffPolicyLearnerState,
     OnlineAndTarget,
 )
@@ -40,9 +30,8 @@ from stoix.evaluator import evaluator_setup, get_distribution_act_fn
 from stoix.networks.base import CompositeNetwork
 from stoix.networks.base import FeedForwardActor as Actor
 from stoix.networks.base import MultiNetwork
-from stoix.networks.postprocessors import tanh_to_spec
-from stoix.systems.ddpg.ddpg_types import DDPGOptStates, DDPGParams
 from stoix.systems.q_learning.dqn_types import Transition
+from stoix.systems.sac.sac_types import SACOptStates, SACParams
 from stoix.utils import make_env as environments
 from stoix.utils.checkpointing import Checkpointer
 from stoix.utils.jax_utils import unreplicate_batch_dim, unreplicate_n_dims
@@ -52,31 +41,13 @@ from stoix.utils.training import make_learning_rate
 from stoix.wrappers.episode_metrics import get_final_step_metrics
 
 
-def get_default_behavior_policy(config: DictConfig, actor_apply_fn: ActorApply) -> Callable:
-    def behavior_policy(
-        params: DDPGParams, observation: Observation, key: chex.PRNGKey
-    ) -> chex.Array:
-        action = actor_apply_fn(params, observation).mode()
-        action_scale = (config.system.action_maximum - config.system.action_minimum) / 2
-        if config.system.exploration_noise != 0:
-            action = rlax.add_gaussian_noise(
-                key, action, config.system.exploration_noise * action_scale
-            ).clip(config.system.action_minimum, config.system.action_maximum)
-        return action
-
-    return behavior_policy
-
-
 def get_warmup_fn(
     env: Environment,
-    params: DDPGParams,
+    params: SACParams,
     actor_apply_fn: ActorApply,
     buffer_add_fn: Callable,
     config: DictConfig,
 ) -> Callable:
-
-    exploratory_actor_apply = get_default_behavior_policy(config, actor_apply_fn)
-
     def warmup(
         env_states: LogEnvState, timesteps: TimeStep, buffer_states: BufferState, keys: chex.PRNGKey
     ) -> Tuple[LogEnvState, TimeStep, BufferState, chex.PRNGKey]:
@@ -88,16 +59,19 @@ def get_warmup_fn(
             env_state, last_timestep, key = carry
             # SELECT ACTION
             key, policy_key = jax.random.split(key)
-            action = exploratory_actor_apply(
-                params.actor_params.online, last_timestep.observation, policy_key
-            )
+            #Warmup with policy
+            #actor_policy = actor_apply_fn(params.actor_params, last_timestep.observation)
+            #action2 = actor_policy.sample(seed=policy_key)
+            #Uniform Warmup
+            action_space = env.action_space()
+            #TODO Find Universal Solution for all environments
+            number_of_envs = env_state.env_state.gymnax_env_state.time.shape
+            action = jax.random.uniform(
+                policy_key, shape=(*number_of_envs,*action_space.shape), minval=action_space.low, maxval=action_space.high
+            ).astype(action_space.dtype)
 
             # STEP ENVIRONMENT
             env_state, timestep = jax.vmap(env.step, in_axes=(0, 0))(env_state, action)
-            #jax.debug.print("Start !!!!!!!!!!!!")
-            #jax.debug.print("{}", params.actor_params.online)
-            #jax.debug.print("End !!!!!!!!!!!!")
-            
 
             # LOG EPISODE METRICS
             done = timestep.last().reshape(-1)
@@ -130,7 +104,7 @@ def get_warmup_fn(
 def get_learner_fn(
     env: Environment,
     apply_fns: Tuple[ActorApply, ContinuousQApply],
-    update_fns: Tuple[optax.TransformUpdateFn, optax.TransformUpdateFn],
+    update_fns: Tuple[optax.TransformUpdateFn, optax.TransformUpdateFn, optax.TransformUpdateFn],
     buffer_fns: Tuple[Callable, Callable],
     config: DictConfig,
 ) -> LearnerFn[OffPolicyLearnerState]:
@@ -138,9 +112,8 @@ def get_learner_fn(
 
     # Get apply and update functions for actor and critic networks.
     actor_apply_fn, q_apply_fn = apply_fns
-    actor_update_fn, q_update_fn = update_fns
+    actor_update_fn, q_update_fn, alpha_update_fn = update_fns
     buffer_add_fn, buffer_sample_fn = buffer_fns
-    exploratory_actor_apply = get_default_behavior_policy(config, actor_apply_fn)
 
     def _update_step(
         learner_state: OffPolicyLearnerState, _: Any
@@ -153,9 +126,9 @@ def get_learner_fn(
 
             # SELECT ACTION
             key, policy_key = jax.random.split(key)
-            action = exploratory_actor_apply(
-                params.actor_params.online, last_timestep.observation, policy_key
-            )
+            actor_policy = actor_apply_fn(params.actor_params, last_timestep.observation)
+
+            action = actor_policy.sample(seed=policy_key)
 
             # STEP ENVIRONMENT
             env_state, timestep = jax.vmap(env.step, in_axes=(0, 0))(env_state, action)
@@ -187,97 +160,97 @@ def get_learner_fn(
         def _update_epoch(update_state: Tuple, _: Any) -> Tuple:
             """Update the network for a single epoch."""
 
+            def _alpha_loss_fn(
+                log_alpha: chex.Array,
+                actor_params: FrozenDict,
+                transitions: Transition,
+                key: chex.PRNGKey,
+            ) -> jnp.ndarray:
+                """Eq 18 from https://arxiv.org/pdf/1812.05905.pdf."""
+                actor_policy = actor_apply_fn(actor_params, transitions.obs)
+                action = actor_policy.sample(seed=key)
+                log_prob = actor_policy.log_prob(action)
+                alpha = jnp.exp(log_alpha)
+                alpha_loss = alpha * jax.lax.stop_gradient(-log_prob - config.system.target_entropy)
+
+                loss_info = {
+                    "alpha_loss": jnp.mean(alpha_loss),
+                    "alpha": jnp.mean(alpha),
+                }
+                return jnp.mean(alpha_loss), loss_info
+
             def _q_loss_fn(
                 q_params: FrozenDict,
+                actor_params: FrozenDict,
                 target_q_params: FrozenDict,
-                target_actor_params: FrozenDict,
+                alpha: jnp.ndarray,
                 transitions: Transition,
-                rng_key: chex.PRNGKey,
+                key: chex.PRNGKey,
             ) -> jnp.ndarray:
-
-                q_tm1 = q_apply_fn(q_params, transitions.obs, transitions.action)
-                action_scale = (config.system.action_maximum - config.system.action_minimum) / 2
-                noise = (
-                    jax.random.normal(rng_key, transitions.action.shape)
-                    * config.system.policy_noise
+                q_old_action = q_apply_fn(q_params, transitions.obs, transitions.action)
+                next_actor_policy = actor_apply_fn(actor_params, transitions.next_obs)
+                next_action = next_actor_policy.sample(seed=key)
+                next_log_prob = next_actor_policy.log_prob(next_action)
+                next_q = q_apply_fn(target_q_params, transitions.next_obs, next_action)
+                next_v = jnp.min(next_q, axis=-1) - alpha * next_log_prob
+                target_q = jax.lax.stop_gradient(
+                    transitions.reward + (1.0 - transitions.done) * config.system.gamma * next_v
                 )
-                clipped_noise = (
-                    jnp.clip(noise, -config.system.noise_clip, config.system.noise_clip)
-                    * action_scale
-                )
-                next_action = (
-                    actor_apply_fn(target_actor_params, transitions.next_obs).mode() + clipped_noise
-                )
-                next_action = jnp.clip(
-                    next_action, config.system.action_minimum, config.system.action_maximum
-                )
-                q_t = q_apply_fn(target_q_params, transitions.next_obs, next_action)
-                next_v = jnp.min(q_t, axis=-1)
-
-                # Cast and clip rewards.
-                discount = 1.0 - transitions.done.astype(jnp.float32)
-                d_t = (discount * config.system.gamma).astype(jnp.float32)
-                r_t = jnp.clip(
-                    transitions.reward, -config.system.max_abs_reward, config.system.max_abs_reward
-                ).astype(jnp.float32)
-
-                target_q = jax.lax.stop_gradient(r_t + d_t * next_v)
-                q_error = q_tm1 - jnp.expand_dims(target_q, -1)
+                q_error = q_old_action - jnp.expand_dims(target_q, -1)
                 q_loss = 0.5 * jnp.mean(jnp.square(q_error))
 
                 loss_info = {
-                    "q_loss": q_loss,
-                    "q1_pred": jnp.mean(q_t[..., 0]),
-                    "q2_pred": jnp.mean(q_t[..., 1]),
+                    "q_loss": jnp.mean(q_loss),
+                    "q_error": jnp.mean(jnp.abs(q_error)),
+                    "q1_pred": jnp.mean(next_q[..., 0]),
+                    "q2_pred": jnp.mean(next_q[..., 1]),
                 }
-
                 return q_loss, loss_info
 
             def _actor_loss_fn(
                 actor_params: FrozenDict,
                 q_params: FrozenDict,
+                alpha: chex.Array,
                 transitions: Transition,
+                key: chex.PRNGKey,
             ) -> chex.Array:
-                o_t = transitions.obs
-                a_t = (
-                    actor_apply_fn(actor_params, o_t)
-                    .mode()
-                    .clip(config.system.action_minimum, config.system.action_maximum)
-                )
-                q_value = q_apply_fn(q_params, o_t, a_t)
-
-                actor_loss = -jnp.mean(q_value)
+                actor_policy = actor_apply_fn(actor_params, transitions.obs)
+                action = actor_policy.sample(seed=key)
+                log_prob = actor_policy.log_prob(action)
+                q_action = q_apply_fn(q_params, transitions.obs, action)
+                min_q = jnp.min(q_action, axis=-1)
+                actor_loss = alpha * log_prob - min_q
 
                 loss_info = {
-                    "actor_loss": actor_loss,
+                    "actor_loss": jnp.mean(actor_loss),
+                    "entropy": jnp.mean(-log_prob),
                 }
-                return actor_loss, loss_info
+                return jnp.mean(actor_loss), loss_info
 
             params, opt_states, buffer_state, key = update_state
 
-            key, sample_key = jax.random.split(key, num=2)
+            key, sample_key, actor_key, q_key, alpha_key = jax.random.split(key, num=5)
 
             # SAMPLE TRANSITIONS
             transition_sample = buffer_sample_fn(buffer_state, sample_key)
             transitions: Transition = transition_sample.experience
+            alpha = jnp.exp(params.log_alpha)
 
             # CALCULATE ACTOR LOSS
             actor_grad_fn = jax.grad(_actor_loss_fn, has_aux=True)
             actor_grads, actor_loss_info = actor_grad_fn(
-                params.actor_params.online,
-                params.q_params.online,
-                transitions,
+                params.actor_params, params.q_params.online, alpha, transitions, actor_key
             )
 
             # CALCULATE Q LOSS
-            key, q_loss_key = jax.random.split(key)
             q_grad_fn = jax.grad(_q_loss_fn, has_aux=True)
             q_grads, q_loss_info = q_grad_fn(
                 params.q_params.online,
+                params.actor_params,
                 params.q_params.target,
-                params.actor_params.target,
+                alpha,
                 transitions,
-                q_loss_key,
+                q_key,
             )
 
             # Compute the parallel mean (pmean) over the batch.
@@ -295,33 +268,50 @@ def get_learner_fn(
             q_grads, q_loss_info = jax.lax.pmean((q_grads, q_loss_info), axis_name="batch")
             q_grads, q_loss_info = jax.lax.pmean((q_grads, q_loss_info), axis_name="device")
 
+            if config.system.autotune:
+                alpha_grad_fn = jax.grad(_alpha_loss_fn, has_aux=True)
+                alpha_grads, alpha_loss_info = alpha_grad_fn(
+                    params.log_alpha, params.actor_params, transitions, alpha_key
+                )
+                alpha_grads, alpha_loss_info = jax.lax.pmean(
+                    (alpha_grads, alpha_loss_info), axis_name="batch"
+                )
+                alpha_grads, alpha_loss_info = jax.lax.pmean(
+                    (alpha_grads, alpha_loss_info), axis_name="device"
+                )
+                log_alpha_updates, alpha_new_opt_state = alpha_update_fn(
+                    alpha_grads, opt_states.alpha_opt_state
+                )
+                log_alpha_new_params = optax.apply_updates(params.log_alpha, log_alpha_updates)
+            else:
+                log_alpha_new_params = params.log_alpha
+                alpha_new_opt_state = opt_states.alpha_opt_state
+                alpha_loss_info = {"alpha_loss": 0.0, "alpha": alpha}
+
             # UPDATE ACTOR PARAMS AND OPTIMISER STATE
             actor_updates, actor_new_opt_state = actor_update_fn(
                 actor_grads, opt_states.actor_opt_state
             )
-            actor_new_online_params = optax.apply_updates(params.actor_params.online, actor_updates)
+            actor_new_params = optax.apply_updates(params.actor_params, actor_updates)
 
             # UPDATE Q PARAMS AND OPTIMISER STATE
             q_updates, q_new_opt_state = q_update_fn(q_grads, opt_states.q_opt_state)
             q_new_online_params = optax.apply_updates(params.q_params.online, q_updates)
             # Target network polyak update.
-            new_target_actor_params, new_target_q_params = optax.incremental_update(
-                (actor_new_online_params, q_new_online_params),
-                (params.actor_params.target, params.q_params.target),
-                config.system.tau,
+            new_target_q_params = optax.incremental_update(
+                q_new_online_params, params.q_params.target, config.system.tau
             )
-
-            actor_new_params = OnlineAndTarget(actor_new_online_params, new_target_actor_params)
             q_new_params = OnlineAndTarget(q_new_online_params, new_target_q_params)
 
             # PACK NEW PARAMS AND OPTIMISER STATE
-            new_params = DDPGParams(actor_new_params, q_new_params)
-            new_opt_state = DDPGOptStates(actor_new_opt_state, q_new_opt_state)
+            new_params = SACParams(actor_new_params, q_new_params, log_alpha_new_params)
+            new_opt_state = SACOptStates(actor_new_opt_state, q_new_opt_state, alpha_new_opt_state)
 
             # PACK LOSS INFO
             loss_info = {
                 **actor_loss_info,
                 **q_loss_info,
+                **alpha_loss_info,
             }
             return (new_params, new_opt_state, buffer_state, key), loss_info
 
@@ -347,7 +337,6 @@ def get_learner_fn(
         This function represents the learner, it updates the network parameters
         by iteratively applying the `_update_step` function for a fixed number of
         updates. The `_update_step` function is vectorized over a batch of inputs.
-
         """
 
         batched_update_step = jax.vmap(_update_step, in_axes=(0, None), axis_name="batch")
@@ -371,7 +360,7 @@ def learner_setup(
     # Get available TPU cores.
     n_devices = len(jax.devices())
 
-    # Get number of actions.
+    # Get number of actions or action dimension from the environment.
     action_dim = int(env.action_spec().shape[-1])
     config.system.action_dim = action_dim
     config.system.action_minimum = float(env.action_spec().minimum)
@@ -383,15 +372,11 @@ def learner_setup(
     # Define actor_network, q_network and optimiser.
     actor_torso = hydra.utils.instantiate(config.network.actor_network.pre_torso)
     actor_action_head = hydra.utils.instantiate(
-        config.network.actor_network.action_head, action_dim=action_dim
-    )
-    action_head_post_processor = hydra.utils.instantiate(
-        config.network.actor_network.post_processor,
+        config.network.actor_network.action_head,
+        action_dim=action_dim,
         minimum=config.system.action_minimum,
         maximum=config.system.action_maximum,
-        scale_fn=tanh_to_spec,
     )
-    actor_action_head = CompositeNetwork([actor_action_head, action_head_post_processor])
     actor_network = Actor(torso=actor_torso, action_head=actor_action_head)
 
     def create_q_network(cfg: DictConfig) -> CompositeNetwork:
@@ -405,16 +390,9 @@ def learner_setup(
     actor_lr = make_learning_rate(config.system.actor_lr, config, config.system.epochs)
     q_lr = make_learning_rate(config.system.q_lr, config, config.system.epochs)
 
-    def delayed_policy_update(step_count: int) -> bool:
-        should_update: bool = jnp.mod(step_count, config.system.policy_frequency) == 0
-        return should_update
-
-    actor_optim = optax.conditionally_mask(
-        optax.chain(
-            optax.clip_by_global_norm(config.system.max_grad_norm),
-            optax.adam(actor_lr, eps=1e-5),
-        ),
-        should_transform_fn=delayed_policy_update,
+    actor_optim = optax.chain(
+        optax.clip_by_global_norm(config.system.max_grad_norm),
+        optax.adam(actor_lr, eps=1e-5),
     )
     q_optim = optax.chain(
         optax.clip_by_global_norm(config.system.max_grad_norm),
@@ -427,29 +405,39 @@ def learner_setup(
     init_a = jnp.zeros((1, action_dim))
 
     # Initialise actor params and optimiser state.
-    actor_online_params = actor_network.init(actor_net_key, init_x)
-    actor_target_params = actor_online_params
-    actor_opt_state = actor_optim.init(actor_online_params)
+    actor_params = actor_network.init(actor_net_key, init_x)
+    actor_opt_state = actor_optim.init(actor_params)
 
-    actor_params = OnlineAndTarget(actor_online_params, actor_target_params)
+    # Initialise q params and optimiser state.
+    online_q_params = double_q_network.init(q_net_key, init_x, init_a)
+    target_q_params = online_q_params
+    q_opt_state = q_optim.init(online_q_params)
 
-    # Initialise critic params and optimiser state.
-    q_online_params = double_q_network.init(q_net_key, init_x, init_a)
-    q_target_params = q_online_params
+    # Automatic entropy tuning
+    target_entropy = -config.system.target_entropy_scale * action_dim
+    if config.system.autotune:
+        log_alpha = jnp.zeros_like(target_entropy)
+    else:
+        log_alpha = jnp.log(config.system.init_alpha)
 
-    q_params = OnlineAndTarget(q_online_params, q_target_params)
+    config.system.target_entropy = target_entropy
 
-    q_opt_state = q_optim.init(q_online_params)
+    alpha_lr = make_learning_rate(config.system.alpha_lr, config, config.system.epochs)
+    alpha_optim = optax.chain(
+        optax.clip_by_global_norm(config.system.max_grad_norm),
+        optax.adam(alpha_lr, eps=1e-5),
+    )
+    alpha_opt_state = alpha_optim.init(log_alpha)
 
-    params = DDPGParams(actor_params, q_params)
-    opt_states = DDPGOptStates(actor_opt_state, q_opt_state)
+    params = SACParams(actor_params, OnlineAndTarget(online_q_params, target_q_params), log_alpha)
+    opt_states = SACOptStates(actor_opt_state, q_opt_state, alpha_opt_state)
 
     actor_network_apply_fn = actor_network.apply
     q_network_apply_fn = double_q_network.apply
 
     # Pack apply and update functions.
     apply_fns = (actor_network_apply_fn, q_network_apply_fn)
-    update_fns = (actor_optim.update, q_optim.update)
+    update_fns = (actor_optim.update, q_optim.update, alpha_optim.update)
 
     # Create replay buffer
     dummy_transition = Transition(
@@ -513,7 +501,7 @@ def learner_setup(
             **config.logger.checkpointing.load_args,  # Other checkpoint args
         )
         # Restore the learner state from the checkpoint
-        restored_params, _ = loaded_checkpoint.restore_params(TParams=DDPGParams)
+        restored_params, _ = loaded_checkpoint.restore_params(TParams=SACParams)
         # Update the params
         params = restored_params
 
@@ -553,50 +541,33 @@ def run_experiment(_config: DictConfig) -> float:
 
     # Calculate total timesteps.
     n_devices = len(jax.devices())
-
     config.num_devices = n_devices
     config = check_total_timesteps(config)
     assert (
         config.arch.num_updates >= config.arch.num_evaluation
     ), "Number of updates per evaluation must be less than total number of updates."
 
-    # Create the environments for train and eval for Safety Agent.
-    safe_env, safe_eval_env = environments.make(config=config)
-    # Create the environments for train and eval for Performance Agent.
-    config.env.scenario.name = "CartPolePerf"
-    perf_env, perf_eval_env = environments.make(config=config)
+    # Create the environments for train and eval.
+    env, eval_env = environments.make(config=config)
 
     # PRNG keys.
-    key, safe_key_e, perf_key_e, safe_actor_net_key, safe_q_net_key, perf_actor_net_key, perf_q_net_key = jax.random.split(
-        jax.random.PRNGKey(config.arch.seed), num=7
+    key, key_e, actor_net_key, q_net_key = jax.random.split(
+        jax.random.PRNGKey(config.arch.seed), num=4
     )
 
-    # Setup safe learner.
-    safe_learn, safe_actor_network, safe_learner_state = learner_setup(
-        safe_env, (key, safe_actor_net_key, safe_q_net_key), config
-    )
-    perf_learn, perf_actor_network, perf_learner_state = learner_setup(
-        perf_env, (key, perf_actor_net_key, perf_q_net_key), config
+    # Setup learner.
+    learn, actor_network, learner_state = learner_setup(
+        env, (key, actor_net_key, q_net_key), config
     )
 
-    # Setup safety evaluator.
-    safe_evaluator, safe_absolute_metric_evaluator, (safe_trained_params, eval_keys) = evaluator_setup(
-        eval_env=safe_eval_env,
-        key_e=safe_key_e,
-        eval_act_fn=get_distribution_act_fn(config, safe_actor_network.apply),
-        params=safe_learner_state.params.actor_params.online,
+    # Setup evaluator.
+    evaluator, absolute_metric_evaluator, (trained_params, eval_keys) = evaluator_setup(
+        eval_env=eval_env,
+        key_e=key_e,
+        eval_act_fn=get_distribution_act_fn(config, actor_network.apply),
+        params=learner_state.params.actor_params,
         config=config,
     )
-
-    # Setup performance evaluator.
-    perf_evaluator, perf_absolute_metric_evaluator, (perf_trained_params, eval_keys) = evaluator_setup(
-        eval_env=perf_eval_env,
-        key_e=perf_key_e,
-        eval_act_fn=get_distribution_act_fn(config, perf_actor_network.apply),
-        params=perf_learner_state.params.actor_params.online,
-        config=config,
-    )
-
 
     # Calculate number of updates per evaluation.
     config.arch.num_updates_per_eval = config.arch.num_updates // config.arch.num_evaluation
@@ -624,27 +595,26 @@ def run_experiment(_config: DictConfig) -> float:
         )
 
     # Run experiment for a total number of evaluations.
-    max_episode_return = jnp.float32(-1e7)
-
-    best_params = unreplicate_batch_dim(safe_learner_state.params.actor_params.online)
+    max_episode_return = jnp.float32(-1e6)
+    best_params = unreplicate_batch_dim(learner_state.params.actor_params)
     for eval_step in range(config.arch.num_evaluation):
         # Train.
         start_time = time.time()
 
-        safe_learner_output = safe_learn(safe_learner_state)
-        jax.block_until_ready(safe_learner_output)
+        learner_output = learn(learner_state)
+        jax.block_until_ready(learner_output)
 
         # Log the results of the training.
         elapsed_time = time.time() - start_time
         t = int(steps_per_rollout * (eval_step + 1))
-        episode_metrics, ep_completed = get_final_step_metrics(safe_learner_output.episode_metrics)
+        episode_metrics, ep_completed = get_final_step_metrics(learner_output.episode_metrics)
         episode_metrics["steps_per_second"] = steps_per_rollout / elapsed_time
 
         # Separately log timesteps, actoring metrics and training metrics.
         logger.log({"timestep": t}, t, eval_step, LogEvent.MISC)
         if ep_completed:  # only log episode metrics if an episode was completed in the rollout.
             logger.log(episode_metrics, t, eval_step, LogEvent.ACT)
-        train_metrics = safe_learner_output.train_metrics
+        train_metrics = learner_output.train_metrics
         # Calculate the number of optimiser steps per second. Since gradients are aggregated
         # across the device and batch axis, we don't consider updates per device/batch as part of
         # the SPS for the learner.
@@ -654,57 +624,38 @@ def run_experiment(_config: DictConfig) -> float:
 
         # Prepare for evaluation.
         start_time = time.time()
-        safe_trained_params = unreplicate_batch_dim(
-            safe_learner_output.learner_state.params.actor_params.online
+        trained_params = unreplicate_batch_dim(
+            learner_output.learner_state.params.actor_params
         )  # Select only actor params
         key_e, *eval_keys = jax.random.split(key_e, n_devices + 1)
         eval_keys = jnp.stack(eval_keys)
         eval_keys = eval_keys.reshape(n_devices, -1)
 
         # Evaluate.
-        safe_evaluator_output = safe_evaluator(safe_trained_params, eval_keys)
-        jax.block_until_ready(safe_evaluator_output)
+        evaluator_output = evaluator(trained_params, eval_keys)
+        jax.block_until_ready(evaluator_output)
 
         # Log the results of the evaluation.
         elapsed_time = time.time() - start_time
-        episode_return = jnp.mean(safe_evaluator_output.episode_metrics["episode_return"])
+        episode_return = jnp.mean(evaluator_output.episode_metrics["episode_return"])
 
-        steps_per_eval = int(jnp.sum(safe_evaluator_output.episode_metrics["episode_length"]))
-        safe_evaluator_output.episode_metrics["steps_per_second"] = steps_per_eval / elapsed_time
-
-        ev = safe_evaluator_output.episode_metrics
-        fig = plt.figure(figsize=(8, 8), clear=True, num=0)
-        ax = fig.add_subplot(111)
-        rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
-                            linewidth=2, edgecolor='green', facecolor='white')
-        ax.add_patch(rectangle)
-        quiver_plot = ax.quiver(ev["x_grid"], ev["z_grid"], ev["arrowDirX"], ev["arrowDirY"], ev["threshold"], cmap="viridis",
-                                angles="xy", scale_units="xy", scale=25)
-        # Set the plot boundaries
-        plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
-        plt.colorbar(quiver_plot, label="Safe actions from value in direction of arrow")
-        plt.xlabel("X")
-        plt.ylabel("Theta")
-        plt.title("Cartpole Border Decisions")
-        # Show the plot
-        img = wandb.Image(plt)
-        #wandb.log({"test":img})
-        safe_evaluator_output.episode_metrics["Image"] = img
-        logger.log(safe_evaluator_output.episode_metrics, t, eval_step, LogEvent.EVAL)
+        steps_per_eval = int(jnp.sum(evaluator_output.episode_metrics["episode_length"]))
+        evaluator_output.episode_metrics["steps_per_second"] = steps_per_eval / elapsed_time
+        logger.log(evaluator_output.episode_metrics, t, eval_step, LogEvent.EVAL)
 
         if save_checkpoint:
             checkpointer.save(
                 timestep=int(steps_per_rollout * (eval_step + 1)),
-                unreplicated_learner_state=unreplicate_n_dims(safe_learner_output.learner_state),
+                unreplicated_learner_state=unreplicate_n_dims(learner_output.learner_state),
                 episode_return=episode_return,
             )
 
         if config.arch.absolute_metric and max_episode_return <= episode_return:
-            best_params = copy.deepcopy(safe_trained_params)
+            best_params = copy.deepcopy(trained_params)
             max_episode_return = episode_return
 
         # Update runner state to continue training.
-        safe_learner_state = safe_learner_output.learner_state
+        learner_state = learner_output.learner_state
 
     # Measure absolute metric.
     if config.arch.absolute_metric:
@@ -714,40 +665,37 @@ def run_experiment(_config: DictConfig) -> float:
         eval_keys = jnp.stack(eval_keys)
         eval_keys = eval_keys.reshape(n_devices, -1)
 
-        safe_evaluator_output = safe_absolute_metric_evaluator(best_params, eval_keys)
-        jax.block_until_ready(safe_evaluator_output)
+        evaluator_output = absolute_metric_evaluator(best_params, eval_keys)
+        jax.block_until_ready(evaluator_output)
 
         elapsed_time = time.time() - start_time
         t = int(steps_per_rollout * (eval_step + 1))
-        steps_per_eval = int(jnp.sum(safe_evaluator_output.episode_metrics["episode_length"]))
-        safe_evaluator_output.episode_metrics["steps_per_second"] = steps_per_eval / elapsed_time
-        logger.log(safe_evaluator_output.episode_metrics, t, eval_step, LogEvent.ABSOLUTE)
+        steps_per_eval = int(jnp.sum(evaluator_output.episode_metrics["episode_length"]))
+        evaluator_output.episode_metrics["steps_per_second"] = steps_per_eval / elapsed_time
+        logger.log(evaluator_output.episode_metrics, t, eval_step, LogEvent.ABSOLUTE)
 
     # Stop the logger.
     logger.stop()
     # Record the performance for the final evaluation run. If the absolute metric is not
     # calculated, this will be the final evaluation run.
-    eval_performance = float(jnp.mean(safe_evaluator_output.episode_metrics[config.env.eval_metric]))
+    eval_performance = float(jnp.mean(evaluator_output.episode_metrics[config.env.eval_metric]))
     return eval_performance
 
 
 @hydra.main(
     config_path="../../configs/default/anakin",
-    config_name="default_ff_td3.yaml",
+    config_name="default_ff_sac.yaml",
     version_base="1.2",
 )
 def hydra_entry_point(cfg: DictConfig) -> float:
     """Experiment entry point."""
     # Allow dynamic attributes.
     OmegaConf.set_struct(cfg, False)
-    for i in range(1):
-        print(cfg)
-        cfg.arch.seed = cfg.arch.seed + i * 100
 
-        # Run experiment.
-        eval_performance = run_experiment(cfg)
+    # Run experiment.
+    eval_performance = run_experiment(cfg)
 
-        print(f"{Fore.CYAN}{Style.BRIGHT}TD3 experiment completed{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{Style.BRIGHT}SAC experiment completed{Style.RESET_ALL}")
     return eval_performance
 
 

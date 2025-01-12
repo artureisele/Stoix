@@ -1,0 +1,16 @@
+defaults:
+  - logger: base_logger
+  - arch: anakin
+  - system: [safety/ff_td3, performance/ff_sac]
+  - network: [safety/mlp_ddpg,performance/mlp_sac]
+  - env: [custom_safety/cartpole, custom_performance/cartpole]
+  - _self_
+
+hydra:
+  searchpath:
+    - file://stoix/configs
+#First Safety Algorithm then Performance algorithm
+#system_choice: ["sac/ff_sac", "ddpg/ff_td3"]
+#network_choice: ["mlp_sac","mlp_ddpg"]
+#env_choice:  ["cartpole_hyperplane", "cartpole_performance"]
+number_double_learning_iterations: 10

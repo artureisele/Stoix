@@ -11,10 +11,10 @@ from colorama import Fore, Style
 from flax.core.frozen_dict import FrozenDict
 from jumanji.env import Environment
 from omegaconf import DictConfig
-
+import flashbax as fbx
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-
+from stoix.systems.q_learning.dqn_types import Transition
 
 from stoix.base_types import (
     ActFn,
@@ -22,6 +22,7 @@ from stoix.base_types import (
     EvalFn,
     EvalState,
     EvaluationOutput,
+    MistakeEvalState,
     RecActFn,
     RecActorApply,
     RNNEvalState,
@@ -71,6 +72,124 @@ def get_rec_distribution_act_fn(config: DictConfig, rec_actor_apply: RecActorApp
 
     return rec_act_fn
 
+def get_ff_evaluator_fn_track_failed_trajectories(
+    env: Environment,
+    act_fn: ActFn,
+    config: DictConfig,
+    log_solve_rate: bool = False,
+    eval_multiplier: int = 1,
+    observation_shape = ()
+) -> EvalFn:
+    """Get the evaluator function for feedforward networks. Additionally return Replay Buffer with failed(not truncated) trajectories.
+    Args:
+        env (Environment): An environment instance for evaluation.
+        act_fn (callable): The act_fn that returns the action taken by the agent.
+        config (dict): Experiment configuration.
+        eval_multiplier (int): A scalar that will increase the number of evaluation
+            episodes by a fixed factor. The reason for the increase is to enable the
+            computation of the `absolute metric` which is a metric computed and the end
+            of training by rolling out the policy which obtained the greatest evaluation
+            performance during training for 10 times more episodes than were used at a
+            single evaluation step.
+    """
+    def eval_one_episode(params: FrozenDict, init_eval_mistake_state: MistakeEvalState) -> Dict:
+        """Evaluate one episode. It is vectorized over the number of evaluation episodes."""
+
+        empty_trajectory = init_eval_mistake_state.trajectory
+
+        def _env_step(mistake_eval_state: MistakeEvalState) -> MistakeEvalState:
+            """Step the environment."""
+            # PRNG keys.
+            key, env_state, last_timestep, step_count, episode_return, trajectory = mistake_eval_state
+
+            # Select action.
+            key, policy_key = jax.random.split(key)
+            
+            #Probably new axis here, because actor works only on batched obs
+            action = act_fn(
+                params,
+                jax.tree_util.tree_map(lambda x: x[jnp.newaxis, ...], last_timestep.observation),
+                policy_key,
+            )
+
+            # Step environment.
+            env_state, timestep = env.step(env_state, action.squeeze())
+
+            # Log episode metrics.
+            episode_return += timestep.reward
+            step_count += 1
+
+            mistake_eval_state = MistakeEvalState(
+                key,
+                env_state,
+                timestep,
+                step_count,
+                episode_return,
+                trajectory=trajectory.at[step_count-1].set(last_timestep.observation.agent_view),
+            )
+            return mistake_eval_state
+
+        def not_done(carry: MistakeEvalState) -> bool:
+            """Check if the episode is done."""
+            timestep = carry[2]
+            is_not_done: bool = ~timestep.last()
+            return is_not_done
+        final_state = jax.lax.while_loop(not_done, _env_step, init_eval_mistake_state)
+        #TODO Check that this really handles the truncation case. Super Imptortant
+        trajectory = jax.lax.cond(jnp.squeeze(final_state.step_count)!=env.eval_params.max_steps_in_episode,lambda: final_state.trajectory, lambda:empty_trajectory)
+        eval_metrics = {
+            "episode_return": final_state.episode_return,
+          
+            "episode_length": final_state.step_count,
+        }
+        # Log solve episode if solve rate is required.
+        if log_solve_rate:
+            eval_metrics["solve_episode"] = jnp.all(
+                final_state.episode_return >= config.env.solved_return_threshold
+            ).astype(int)
+        return eval_metrics, trajectory
+
+    def evaluator_fn(trained_params: FrozenDict, key: chex.PRNGKey) -> EvaluationOutput[EvalState]:
+        """Evaluator function."""
+
+        # Initialise environment states and timesteps.
+        n_devices = len(jax.devices())
+
+        eval_batch = (config.arch.num_eval_episodes // n_devices) * eval_multiplier
+
+        key, *env_keys = jax.random.split(key, eval_batch + 1)
+        env_states, timesteps = jax.vmap(env.reset)(
+            jnp.stack(env_keys),
+        )
+        # Split keys for each core.
+        key, *step_keys = jax.random.split(key, eval_batch + 1)
+        # Add dimension to pmap over.
+        step_keys = jnp.stack(step_keys).reshape(eval_batch, -1)
+
+        mistake_eval_state = MistakeEvalState(
+            key=step_keys,
+            env_state=env_states,
+            timestep=timesteps,
+            step_count=jnp.zeros((eval_batch, 1), dtype=jnp.int32),
+            episode_return=jnp.zeros_like(timesteps.reward),
+            trajectory=jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode, *observation_shape))
+        )
+        eval_metrics, final_mistake_trajectories = jax.vmap(
+            eval_one_episode,
+            in_axes=(None, 0),
+            out_axes=(0,0),
+            axis_name="eval_batch",
+        )(trained_params, mistake_eval_state)
+
+        return EvaluationOutput(
+            learner_state=final_mistake_trajectories,
+            episode_metrics=eval_metrics,
+        )
+
+    return evaluator_fn
+
+
+
 
 def get_ff_evaluator_fn(
     env: Environment,
@@ -103,7 +222,8 @@ def get_ff_evaluator_fn(
 
             # Select action.
             key, policy_key = jax.random.split(key)
-
+            
+            #Probably new axis here, because actor works only on batched obs
             action = act_fn(
                 params,
                 jax.tree_util.tree_map(lambda x: x[jnp.newaxis, ...], last_timestep.observation),
@@ -126,7 +246,7 @@ def get_ff_evaluator_fn(
             return is_not_done
 
         final_state = jax.lax.while_loop(not_done, _env_step, init_eval_state)
-
+        
         eval_metrics = {
             "episode_return": final_state.episode_return,
             "episode_length": final_state.step_count,
@@ -163,15 +283,14 @@ def get_ff_evaluator_fn(
             step_count=jnp.zeros((eval_batch, 1)),
             episode_return=jnp.zeros_like(timesteps.reward),
         )
-        #jax.debug.print("{}", eval_state)
-        #jax.debug.print("{}", eval_state.shape)
+
         eval_metrics = jax.vmap(
             eval_one_episode,
             in_axes=(None, 0),
             axis_name="eval_batch",
         )(trained_params, eval_state)
 
-
+        """
         safe_radians = 24 * 2 * math.pi / 360
         x_range = jnp.arange(-4.8, 4.9, 0.2)  # First dimension: -2.4 to 2.4
         z_range = jnp.arange(-2*safe_radians, 2*safe_radians, math.pi / 360 *8)  # Third dimension: -2 to 2
@@ -198,45 +317,19 @@ def get_ff_evaluator_fn(
         safe_x = 2.4
         action2 = jnp.squeeze(action2)
         # Create the figure and axes for the plot
-        fig = plt.figure(figsize=(8, 8))
-        ax = fig.add_subplot(111)
         a_h = action2[:,0]/jnp.abs(action2[:,0])
-        #jax.debug.print("ah{}", a_h[0])
-        #jax.debug.print("{}", a_h.shape)
+
         threshold = jnp.clip(action2[:,1] / a_h, -1, 1)
-        #jax.debug.print("bh{}", action2[0,1])
-        #jax.debug.print("th{}", threshold[0])
-        #jax.debug.print("{}", threshold.shape)
+
         arrowDirY = 1-((a_h<0)*2) 
-        #jax.debug.print("{}", arrowDirY)
-        #jax.debug.print("{}", arrowDirY.shape)
         arrowDirX = jnp.zeros_like(arrowDirY).flatten()
-        #jax.debug.print("{}", arrowDirX)
-        #jax.debug.print("{}", arrowDirX.shape)
-        # Plot the rectangle representing the simulation boundaries
-        ##rectangle = patches.Rectangle((-safe_x, -safe_radians), 2 * safe_x, 2 * safe_radians,
-        #                            linewidth=2, edgecolor='green', facecolor='white')
-        #ax.add_patch(rectangle)
-        #convert_to_numpy = jax.pure_callback(lambda x: jnp.asarray(x), x_grid, jnp.float32)
-        #threshold_np = convert_to_numpy(threshold)
-        #print(threshold_np)
-        #print(type(threshold_np))
-        # Create the quiver plot
-        #quiver_plot = ax.quiver(x_grid, z_grid, arrowDirX, arrowDirY, threshold, cmap="viridis",
-        #                        angles="xy", scale_units="xy", scale=25)
-        # Set the plot boundaries
-        #plt.axis([-2 * safe_x, 2 * safe_x, -2 * safe_radians, 2 * safe_radians])
-        #plt.colorbar(quiver_plot, label="Safe actions from value in direction of arrow")
-        #plt.xlabel("X")
-        #plt.ylabel("Theta")
-        #plt.title("Cartpole Border Decisions")
-        # Show the plot
-        #plt.show()
+
         eval_metrics["x_grid"] = x_grid
         eval_metrics["z_grid"] = z_grid
         eval_metrics["arrowDirX"] = arrowDirX
         eval_metrics["arrowDirY"] = arrowDirY
         eval_metrics["threshold"] = threshold
+        """
         return EvaluationOutput(
             learner_state=eval_state,
             episode_metrics=eval_metrics,
@@ -376,6 +469,7 @@ def evaluator_setup(
     params: FrozenDict,
     config: DictConfig,
     use_recurrent_net: bool = False,
+    track_failed_trajectories: bool = False,
     scanned_rnn: Optional[nn.Module] = None,
 ) -> Tuple[EvalFn, EvalFn, Tuple[FrozenDict, chex.Array]]:
     """Initialise evaluator_fn."""
@@ -405,17 +499,32 @@ def evaluator_setup(
             10,
         )
     else:
-        evaluator = get_ff_evaluator_fn(
-            eval_env, eval_act_fn, config, log_solve_rate  # type: ignore
-        )
-        absolute_metric_evaluator = get_ff_evaluator_fn(
-            eval_env,
-            eval_act_fn,  # type: ignore
-            config,
-            log_solve_rate,
-            10,
-        )
+        observation_shape = eval_env.observation_spec().generate_value().agent_view.shape
+        # Create replay buffer
 
+        if track_failed_trajectories:
+            evaluator = get_ff_evaluator_fn_track_failed_trajectories(
+                eval_env, eval_act_fn, config, log_solve_rate,observation_shape= observation_shape  # type: ignore
+            )
+            absolute_metric_evaluator = get_ff_evaluator_fn_track_failed_trajectories(
+                eval_env,
+                eval_act_fn,  # type: ignore
+                config,
+                log_solve_rate,
+                10,
+                observation_shape=observation_shape
+            )
+        else:
+            evaluator = get_ff_evaluator_fn(
+                eval_env, eval_act_fn, config, log_solve_rate  # type: ignore
+            )
+            absolute_metric_evaluator = get_ff_evaluator_fn(
+                eval_env,
+                eval_act_fn,  # type: ignore
+                config,
+                log_solve_rate,
+                10,
+            )
     evaluator = jax.pmap(evaluator, axis_name="device")
     absolute_metric_evaluator = jax.pmap(absolute_metric_evaluator, axis_name="device")
 

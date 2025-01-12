@@ -10,8 +10,9 @@ from jax import lax
 import jax.numpy as jnp
 from gymnax.environments import environment
 from gymnax.environments import spaces
-
-
+from stoix.base_types import (
+    Observation
+)
 @struct.dataclass
 class EnvState(environment.EnvState):
     x: jnp.ndarray
@@ -31,10 +32,9 @@ class EnvParams(environment.EnvParams):
     polemass_length: float = 0.05  # (masspole * length)
     force_mag: float = 30.0
     tau: float = 0.02
-    theta_threshold_radians: float = 24 * 2 * jnp.pi / 360
-    x_threshold: float = 2.4
     max_steps_in_episode: int = 500  # v0 had only 200 steps!
-    reward_with_bonus = True
+    x_threshold: float = 2.4
+    theta_threshold_radians: float = 24 * 2 * jnp.pi / 360
 
 @struct.dataclass
 class EvalEnvParams(environment.EnvParams):
@@ -46,10 +46,10 @@ class EvalEnvParams(environment.EnvParams):
     polemass_length: float = 0.05  # (masspole * length)
     force_mag: float = 30.0
     tau: float = 0.02
-    theta_threshold_radians: float = 24 * 2 * jnp.pi / 360
-    x_threshold: float = 2.4
     max_steps_in_episode: int = 500  # v0 had only 200 steps!
-    reward_with_bonus = False
+    x_threshold: float = 2.4
+    theta_threshold_radians: float = 24 * 2 * jnp.pi / 360
+
 
 class CartPole(environment.Environment[EnvState, EnvParams]):
     """JAX Compatible version of CartPole-v1 OpenAI gym environment.
@@ -58,9 +58,12 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     Source: github.com/openai/gym/blob/master/gym/envs/classic_control/cartpole.py
     """
 
-    def __init__(self, eval = True):
+    def __init__(self, eval = True, focus = 1.5, safety_filter_function = None, safety_filter_params = None):
         super().__init__()
         self.obs_shape = (4,)
+        self.focus = focus
+        self.safety_filter_function = safety_filter_function
+        self.safety_filter_params = safety_filter_params
 
     @property
     def default_params(self) -> EnvParams:
@@ -70,6 +73,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     def eval_params(self) -> EnvParams:
         # Default environment parameters for CartPole-v1
         return EvalEnvParams()
+    
     def step_env(
         self,
         key: chex.PRNGKey,
@@ -79,6 +83,37 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
         """Performs step transitions in the environment."""
         prev_terminal = self.is_terminal(state, params)
+
+        if self.safety_filter_function!=None and self.safety_filter_params!=None:
+            action_proposal = action
+
+            observation = Observation(
+                agent_view=self.get_obs(state, params),
+                action_mask=jnp.array([True, True]),
+                step_count=jnp.array(0)
+            )
+            action_safety_filter = self.safety_filter_function(
+                self.safety_filter_params,
+                observation,
+                key,
+            )
+            a_h = action_safety_filter[0]/jnp.abs(action_safety_filter[0])
+            b_h = action_safety_filter[1]
+            #jax.debug.print("Safe a_h :{}",a_h)
+            #jax.debug.print("Safe b_h :{}",b_h)
+            def proj_fn(inp):
+                a,a_h,b_h = inp
+                numerator = (jnp.dot(a_h, a) - b_h)
+                denominator = jnp.sum(jnp.power(a_h,2)) # ||a_h||_2^2
+                projection = a - (numerator / denominator) * a_h
+                return projection
+
+            def identity_fn(inp):
+                a,a_h,b_h = inp
+                return a
+
+            action = jax.lax.cond(jnp.squeeze(jnp.dot(a_h, action_proposal) < b_h), proj_fn, identity_fn, operand=(action_proposal,a_h,b_h))
+        """
         a_h = action[0]/jnp.abs(action[0])
         b_h = action[1]
 
@@ -98,6 +133,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             return a
 
         action = jax.lax.cond(jnp.squeeze(jnp.dot(a_h, action_proposal) < b_h), proj_fn, identity_fn, operand=(action_proposal,a_h,b_h))
+        """
         force = params.force_mag * jax.numpy.squeeze(action)
         costheta = jnp.cos(state.theta)
         sintheta = jnp.sin(state.theta)
@@ -118,10 +154,10 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         theta_dot = state.theta_dot + params.tau * thetaacc
 
         # Important: Reward is based on termination is previous step transition
-        reward = 1.0 - prev_terminal*101
+        penalty = jnp.abs(x-self.focus)/(2*params.x_threshold)
         
-        if params.reward_with_bonus:
-            reward += 0.5 * freedom_factor
+        reward = 1 - penalty - prev_terminal*101
+        
 
         # Update state dict and evaluate termination conditions
         state = EnvState(
@@ -170,7 +206,6 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             state.theta < -params.theta_threshold_radians,
             state.theta > params.theta_threshold_radians,
         )
-
         # Check number of steps in episode termination condition
         done_steps = state.time >= params.max_steps_in_episode
         done = jnp.logical_or(jnp.logical_or(done1, done2), done_steps)
@@ -184,12 +219,12 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     @property
     def num_actions(self) -> int:
         """Number of actions possible in environment."""
-        return 2
+        return 1
 
     def action_space(self, params: Optional[EnvParams] = None) -> spaces.Discrete:
         """Action space of the environment."""
         high_action = jnp.array(1)
-        return spaces.Box(-high_action, high_action, (2,), dtype=jnp.float32)
+        return spaces.Box(-high_action, high_action, (1,), dtype=jnp.float32)
 
     def observation_space(self, params: EnvParams) -> spaces.Box:
         """Observation space of the environment."""

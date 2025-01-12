@@ -58,9 +58,10 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     Source: github.com/openai/gym/blob/master/gym/envs/classic_control/cartpole.py
     """
 
-    def __init__(self, eval = True):
+    def __init__(self, eval = True,mistake_trajectories=None ):
         super().__init__()
         self.obs_shape = (4,)
+        self.mistake_trajectories = mistake_trajectories
 
     @property
     def default_params(self) -> EnvParams:
@@ -145,14 +146,26 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         self, key: chex.PRNGKey, params: EnvParams
     ) -> Tuple[chex.Array, EnvState]:
         """Performs resetting of environment."""
-        init_state = jax.random.uniform(key, minval=-0.05, maxval=0.05, shape=(4,))
-        state = EnvState(
-            x=init_state[0],
-            x_dot=init_state[1],
-            theta=init_state[2],
-            theta_dot=init_state[3],
-            time=0,
-        )
+        if self.mistake_trajectories == None:
+            init_state = jax.random.uniform(key, minval=-0.05, maxval=0.05, shape=(4,))
+            state = EnvState(
+                x=init_state[0],
+                x_dot=init_state[1],
+                theta=init_state[2],
+                theta_dot=init_state[3],
+                time=0,
+            )
+        else:
+            num_trajectories = self.mistake_trajectories.shape[0]
+            sampled_idx = jax.random.randint(key, shape=(), minval=0, maxval=num_trajectories)
+            sampled_trajectory = self.mistake_trajectories[sampled_idx]
+            state = EnvState(
+                x=sampled_trajectory[0],
+                x_dot=sampled_trajectory[1],
+                theta=sampled_trajectory[2],
+                theta_dot=sampled_trajectory[3],
+                time=0,
+            )
         return self.get_obs(state), state
 
     def get_obs(self, state: EnvState, params=None, key=None) -> chex.Array:

@@ -72,6 +72,16 @@ class EvalState(NamedTuple):
     step_count: chex.Array
     episode_return: chex.Array
 
+class MistakeEvalState(NamedTuple):
+    """State of the performance evaluator in double learning."""
+    key: chex.PRNGKey
+    env_state: State
+    timestep: TimeStep
+    step_count: chex.Array
+    episode_return: chex.Array
+    trajectory: chex.Array
+
+
 
 class RNNEvalState(NamedTuple):
     """State of the evaluator for recurrent architectures."""
