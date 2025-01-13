@@ -62,7 +62,7 @@ class StoixLogger:
         # if statements to a minimum.
         if "solve_episode" in metrics:
             metrics = self.calc_solve_rate(metrics, event)
-        if event == LogEvent.TRAIN:
+        if event == LogEvent.TRAIN_SAFE or event == LogEvent.TRAIN_Perf:
             # We only want to log mean losses, max/min/std don't matter.
             metrics = jax.tree_util.tree_map(np.mean, metrics)
         else:

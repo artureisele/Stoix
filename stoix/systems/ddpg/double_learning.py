@@ -108,6 +108,7 @@ def initialize_config_dicts(_config_s, _config_p):
     config_p.system.epochs = config_p.system.initial_learning_epochs
     # PRNG keys, seed are the same for both configs, choose config_s as default config
     key = jax.random.PRNGKey(config_s.arch.seed)
+    config_p.arch.evaluation_greedy = False #Important, that when we check if the filtered performance policy is safe, we evaluate with samples like in the "real" env SAC agent
     return config_s, config_p, key
 
 def generate_safety_env_and_learn(config_s, key, custom_extras):
@@ -116,7 +117,7 @@ def generate_safety_env_and_learn(config_s, key, custom_extras):
     safe_env, safe_eval_env = environments.make(config=config_s, custom_extras=custom_extras)
     
     # Setup safe learner
-    safe_learn, safe_actor_network, safe_learner_state = learner_setup_s(
+    safe_learn, safe_actor_network,safe_q_network, safe_learner_state = learner_setup_s(
         safe_env, (key, safe_actor_net_key, safe_q_net_key), config_s
     )
 
@@ -128,12 +129,12 @@ def generate_safety_env_and_learn(config_s, key, custom_extras):
         params=safe_learner_state.params.actor_params.online,
         config=config_s,
     )
-    return key, safe_learn, safe_actor_network, safe_learner_state, safe_evaluator
+    return key, safe_learn, safe_actor_network, safe_q_network, safe_learner_state, safe_evaluator
 
-def log_training_metrics_safety_training(config_s, elapsed_time, eval_step, safe_learner_output, logger):
+def log_training_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, safe_learner_output, logger):
     # Log the results of the training.
-    t = int(config_s.system.steps_per_rollout * (eval_step + 1))
-
+    t = int(config_p.system.steps_per_rollout * (eval_step_perf + 1)) + int(config_s.system.steps_per_rollout * (eval_step_safety + 1))
+    eval_step = eval_step_perf+eval_step_safety
     episode_metrics, ep_completed = get_final_step_metrics(safe_learner_output.episode_metrics)
     episode_metrics["steps_per_second"] = config_s.system.steps_per_rollout / elapsed_time
     # Separately log timesteps, actoring metrics and training metrics.
@@ -158,9 +159,10 @@ def prepare_safe_evaluation(config_s, key, safe_learner_output):
 
     return key, safe_trained_params, eval_keys
 
-def log_evaluation_metrics_safety_training(config_s, elapsed_time, eval_step, safe_evaluator_output,logger):
+def log_evaluation_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety, eval_step_perf, safe_evaluator_output,logger):
     episode_return = jnp.mean(safe_evaluator_output.episode_metrics["episode_return"])
-    t = int(config_s.system.steps_per_rollout * (eval_step + 1))
+    t = int(config_p.system.steps_per_rollout * (eval_step_perf + 1)) + int(config_s.system.steps_per_rollout * (eval_step_safety + 1))
+    eval_step = eval_step_perf+eval_step_safety
     steps_per_eval = int(jnp.sum(safe_evaluator_output.episode_metrics["episode_length"]))
     safe_evaluator_output.episode_metrics["steps_per_second"] = steps_per_eval / elapsed_time
     logger.log(safe_evaluator_output.episode_metrics, t, eval_step, LogEvent.EVAL_SAFE)
@@ -190,9 +192,10 @@ def generate_performance_learner_and_evaluator(config_s, key, config_p, safe_act
     )
     return key, perf_learn, perf_actor_network, perf_learner_state, perf_evaluator
 
-def log_training_metrics_performance_training(config_p, elapsed_time, eval_step, perf_learner_output, logger):
+def log_training_metrics_performance_training(config_p,config_s, elapsed_time, eval_step_perf,eval_step_safety, perf_learner_output, logger):
     # Log the results of the training.
-    t = int(config_p.system.steps_per_rollout * (eval_step + 1))
+    t = int(config_p.system.steps_per_rollout * (eval_step_perf + 1)) + int(config_s.system.steps_per_rollout * (eval_step_safety + 1))
+    eval_step = eval_step_perf+eval_step_safety
     episode_metrics, ep_completed = get_final_step_metrics(perf_learner_output.episode_metrics)
     episode_metrics["steps_per_second"] = config_p.system.steps_per_rollout / elapsed_time
 
@@ -212,13 +215,14 @@ def prepare_performance_evaluation(config_p, key, perf_learner_output):
     perf_trained_params = unreplicate_batch_dim(
         perf_learner_output.learner_state.params.actor_params
     )  # Select only actor params
-    perf_key_e, *perf_eval_keys = jax.random.split(perf_key_e, config_p.n_devices + 1)
+    key, *perf_eval_keys = jax.random.split(key, config_p.n_devices + 1)
     perf_eval_keys = jnp.stack(perf_eval_keys)
     perf_eval_keys = perf_eval_keys.reshape(config_p.n_devices, -1)
     return key, perf_trained_params, perf_eval_keys
 
-def log_evaluation_metrics_performance_agent_for_safety_training(config_s, elapsed_time, eval_step, perf_evaluator_output,logger):
-    t = int(config_s.system.steps_per_rollout * (eval_step + 1))
+def log_evaluation_metrics_performance_agent_for_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger):
+    t = int(config_p.system.steps_per_rollout * (eval_step_perf + 1)) + int(config_s.system.steps_per_rollout * (eval_step_safety + 1))
+    eval_step = eval_step_perf+eval_step_safety
     steps_per_eval = int(jnp.sum(perf_evaluator_output.episode_metrics["episode_length"]))
     perf_evaluator_output.episode_metrics["steps_per_second"] = steps_per_eval / elapsed_time
     logger.log(perf_evaluator_output.episode_metrics, t, eval_step, LogEvent.EVAL_Perf)
@@ -234,12 +238,12 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
     logger = StoixLogger(config_s)
 
     print("Start initalizing safety training!")
-    key, safe_learn, safe_actor_network, safe_learner_state, safe_evaluator = generate_safety_env_and_learn(config_s, key, custom_extras={})
+    key, safe_learn, safe_actor_network, safe_q_network, safe_learner_state, safe_evaluator = generate_safety_env_and_learn(config_s, key, custom_extras={})
 
     print("Start first safety training for regular starting states")
     safe = False
     eval_step_safety = 0
-
+    eval_step_perf=0
     while(not safe):
         start_time = time.time()
         print(f"Start safety learning for eval_step: {eval_step_safety}")
@@ -248,7 +252,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         elapsed_time = time.time() - start_time
         
         print(f"Start logging training results for eval_step: {eval_step_safety}")
-        log_training_metrics_safety_training(config_s, elapsed_time, eval_step_safety, safe_learner_output, logger)
+        log_training_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, safe_learner_output, logger)
 
         start_time = time.time()
         key, safe_trained_params, eval_keys = prepare_safe_evaluation(config_s, key, safe_learner_output)
@@ -259,7 +263,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
 
         # Log the results of the evaluation.
         elapsed_time = time.time() - start_time
-        episode_return = log_evaluation_metrics_safety_training(config_s, elapsed_time, eval_step_safety, safe_evaluator_output,logger)
+        episode_return = log_evaluation_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, safe_evaluator_output,logger)
         print(f"Episode Return of evaluation: {episode_return}")
 
         # Terminate if environment is safety filtered
@@ -271,7 +275,6 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         safe_learner_state = safe_learner_output.learner_state
 
     print("Start Initializing the Performance Training")
-    eval_step_performance = 0
     key, perf_learn, perf_actor_network, perf_learner_state, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network, safe_learner_state)
     
     print("Start first performance training for biasing the first learned performance polciy")
@@ -284,9 +287,9 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
     config_p.system.epochs = _config_p.system.epochs
 
     elapsed_time = time.time() - start_time    
-    log_training_metrics_performance_training(config_p, elapsed_time, eval_step_performance, perf_learner_output, logger)
+    log_training_metrics_performance_training(config_p,config_s, elapsed_time, eval_step_perf,eval_step_safety, perf_learner_output, logger)
     
-    eval_step_performance+=1
+    eval_step_perf+=1
     # Update runner state to continue training.
     perf_learner_state = perf_learner_output.learner_state
 
@@ -309,25 +312,37 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             final_mistake_trajectories = perf_evaluator_output.learner_state
             final_mistake_trajectories_flatten = final_mistake_trajectories.reshape(-1, final_mistake_trajectories.shape[-1])
             final_mistake_trajectories = final_mistake_trajectories_flatten[jnp.any(final_mistake_trajectories_flatten!=0,axis=1)]
+            if len(final_mistake_trajectories)>5:
+                random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(5,), replace=False)
+                final_mistake_trajectories = final_mistake_trajectories[random_indices]
 
             # Log the results of the evaluation.
             elapsed_time = time.time() - start_time
-            print("Performance eval length: {}", perf_eval_length)
-            perf_eval_length = log_evaluation_metrics_performance_agent_for_safety_training(config_s, elapsed_time, eval_step_safety, perf_evaluator_output,logger)
+            perf_eval_length = log_evaluation_metrics_performance_agent_for_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
+            print(f"Performance eval length: {perf_eval_length}")
             if perf_eval_length >=config_s.env.solved_return_threshold:
                 break
 
             custom_extras_safety = {"mistake_trajectories": final_mistake_trajectories}
+            print(f"Len Mistake:{len(final_mistake_trajectories)}")
 
-            key, safe_learn, safe_actor_network, safe_learner_state, safe_evaluator = generate_safety_env_and_learn(config_s, key, custom_extras_safety)
+            key, safe_learn, _, _,_, safe_evaluator = generate_safety_env_and_learn(config_s, key, custom_extras_safety)
 
             start_time = time.time()
             safe_learner_output = safe_learn(safe_learner_state)
             jax.block_until_ready(safe_learner_output)
 
             # Log the results of the training.
-            episode_return = log_evaluation_metrics_safety_training(config_s, elapsed_time, eval_step_safety, safe_evaluator_output,logger)
-            print("Episode Return of Training safety starting from mistake starting states: {}", episode_return)
+            log_training_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, safe_learner_output,logger)
+            start_time = time.time()
+            key, safe_trained_params, eval_keys = prepare_safe_evaluation(config_s, key, safe_learner_output)
+            safe_evaluator_output = safe_evaluator(safe_trained_params, eval_keys)
+            jax.block_until_ready(safe_evaluator_output)
+            # Log the results of the evaluation.
+            elapsed_time = time.time() - start_time
+            episode_return = log_evaluation_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, safe_evaluator_output,logger)
+            print(f"Episode Return of Training safety starting from mistake starting states: {episode_return}")
+
             safe_learner_state = safe_learner_output.learner_state
             eval_step_safety+=1
 
@@ -339,9 +354,9 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         jax.block_until_ready(perf_learner_output)
 
         elapsed_time = time.time() - start_time    
-        log_training_metrics_performance_training(config_p, elapsed_time, eval_step_performance, perf_learner_output, logger)
+        log_training_metrics_performance_training(config_p,config_s, elapsed_time, eval_step_perf,eval_step_safety, perf_learner_output, logger)
         
-        eval_step_performance+=1
+        eval_step_perf+=1
         # Update runner state to continue training.
         perf_learner_state = perf_learner_output.learner_state
     # Stop the logger.

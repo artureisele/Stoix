@@ -82,11 +82,11 @@ class GymnaxWrapper(Wrapper):
         state = GymnaxEnvState(
             key=key, gymnax_env_state=gymnax_state, step_count=state.step_count + 1
         )
-
+        truncation = (state.step_count >= self._env_params.max_steps_in_episode)
         timestep = TimeStep(
             observation=Observation(obs, self._legal_action_mask, state.step_count),
             reward=reward.astype(float),
-            discount=jnp.array(1.0 - done, dtype=float),
+            discount=jnp.array(jax.lax.select(truncation, 1.0, 1.0 - done), dtype=float),
             step_type=jax.lax.select(done, StepType.LAST, StepType.MID),
             extras={},
         )

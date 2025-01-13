@@ -80,6 +80,8 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
         """Performs step transitions in the environment."""
         prev_terminal = self.is_terminal(state, params)
+        truncation = (state.time >= params.max_steps_in_episode)
+        prev_terminal_and_not_truncated = jnp.logical_and(prev_terminal, jnp.logical_not(truncation) )
         a_h = action[0]/jnp.abs(action[0])
         b_h = action[1]
 
@@ -119,7 +121,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         theta_dot = state.theta_dot + params.tau * thetaacc
 
         # Important: Reward is based on termination is previous step transition
-        reward = 1.0 - prev_terminal*101
+        reward = 1.0 - prev_terminal_and_not_truncated*101
         
         if params.reward_with_bonus:
             reward += 0.5 * freedom_factor

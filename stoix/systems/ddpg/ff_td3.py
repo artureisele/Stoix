@@ -543,7 +543,7 @@ def learner_setup(
         params, opt_states, buffer_states, step_keys, env_states, timesteps
     )
 
-    return learn, actor_network, init_learner_state
+    return learn, actor_network,double_q_network, init_learner_state
 
 
 def run_experiment(_config: DictConfig) -> float:
