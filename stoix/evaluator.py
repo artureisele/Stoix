@@ -290,7 +290,6 @@ def get_ff_evaluator_fn(
             axis_name="eval_batch",
         )(trained_params, eval_state)
 
-        """
         safe_radians = 24 * 2 * math.pi / 360
         x_range = jnp.arange(-4.8, 4.9, 0.2)  # First dimension: -2.4 to 2.4
         z_range = jnp.arange(-2*safe_radians, 2*safe_radians, math.pi / 360 *8)  # Third dimension: -2 to 2
@@ -329,7 +328,7 @@ def get_ff_evaluator_fn(
         eval_metrics["arrowDirX"] = arrowDirX
         eval_metrics["arrowDirY"] = arrowDirY
         eval_metrics["threshold"] = threshold
-        """
+        
         return EvaluationOutput(
             learner_state=eval_state,
             episode_metrics=eval_metrics,

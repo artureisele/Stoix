@@ -51,10 +51,10 @@ from stoix.utils.total_timestep_checker import check_total_timesteps
 from stoix.utils.training import make_learning_rate
 from stoix.wrappers.episode_metrics import get_final_step_metrics
 
-from stoix.systems.ddpg.ff_td3 import learner_setup as learner_setup_s
-from stoix.systems.ddpg.ff_td3 import get_learner_fn as get_learner_fn_s
-from stoix.systems.ddpg.ff_td3 import get_warmup_fn as get_warmup_fn_s
-from stoix.systems.ddpg.ff_td3 import get_default_behavior_policy as get_default_behavior_policy_s
+from stoix.systems.ppo.anakin.ff_ppo_continuous import learner_setup as learner_setup_s
+from stoix.systems.ppo.anakin.ff_ppo_continuous import get_learner_fn as get_learner_fn_s
+#from stoix.systems.ppo.anakin.ff_ppo_continuous import get_warmup_fn as get_warmup_fn_s
+#from stoix.systems.ppo.anakin.ff_ppo_continuous import get_default_behavior_policy as get_default_behavior_policy_s
 
 from stoix.systems.sac.ff_sac_delayed import learner_setup as learner_setup_p
 from stoix.systems.sac.ff_sac_delayed import get_learner_fn as get_learner_fn_p
@@ -126,7 +126,7 @@ def generate_safety_env_and_learn(config_s, key, custom_extras):
         eval_env=safe_eval_env,
         key_e=safe_key_e,
         eval_act_fn=get_distribution_act_fn(config_s, safe_actor_network.apply),
-        params=safe_learner_state.params.actor_params.online,
+        params=safe_learner_state.params.actor_params,
         config=config_s,
     )
     return key, safe_learn, safe_actor_network, safe_q_network, safe_learner_state, safe_evaluator
@@ -152,7 +152,7 @@ def log_training_metrics_safety_training(config_s,config_p, elapsed_time, eval_s
 
 def prepare_safe_evaluation(config_s, key, safe_learner_output):
     safe_trained_params = unreplicate_batch_dim(
-        safe_learner_output.learner_state.params.actor_params.online
+        safe_learner_output.learner_state.params.actor_params
     )  # Select only actor params
     key, *eval_keys = jax.random.split(key, config_s.n_devices + 1)
     eval_keys = jnp.stack(eval_keys).reshape(config_s.n_devices, -1)
@@ -171,7 +171,7 @@ def log_evaluation_metrics_safety_training(config_s,config_p, elapsed_time, eval
 def generate_performance_learner_and_evaluator(config_s, key, config_p, safe_actor_network, safe_learner_state):
     custom_extras = {
         "safety_filter_function" : get_distribution_act_fn(config_s, safe_actor_network.apply),
-        "safety_filter_params": unreplicate_n_dims(safe_learner_state.params.actor_params.online)
+        "safety_filter_params": unreplicate_n_dims(safe_learner_state.params.actor_params)
     }
     perf_env, perf_eval_env = environments.make(config=config_p, custom_extras = custom_extras)
 
@@ -261,6 +261,28 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         safe_evaluator_output = safe_evaluator(safe_trained_params, eval_keys)
         jax.block_until_ready(safe_evaluator_output)
 
+        ev = safe_evaluator_output.episode_metrics
+        fig = plt.figure(figsize=(8, 8), clear=True, num=0)
+        ax = fig.add_subplot(111)
+        rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
+                            linewidth=2, edgecolor='green', facecolor='white')
+        ax.add_patch(rectangle)
+        quiver_plot = ax.quiver(ev["x_grid"], ev["z_grid"], ev["arrowDirX"], ev["arrowDirY"], ev["threshold"], cmap="viridis",
+                                angles="xy", scale_units="xy", scale=25)
+        # Set the plot boundaries
+        plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
+        plt.colorbar(quiver_plot, label="Safe actions from value in direction of arrow")
+        plt.xlabel("X")
+        plt.ylabel("Theta")
+        plt.title("Cartpole Border Decisions")
+        # Show the plot
+        img = wandb.Image(plt)
+        #wandb.log({"test":img})
+        safe_evaluator_output.episode_metrics["Image"] = img
+
+
+
+
         # Log the results of the evaluation.
         elapsed_time = time.time() - start_time
         episode_return = log_evaluation_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, safe_evaluator_output,logger)
@@ -339,6 +361,27 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             safe_evaluator_output = safe_evaluator(safe_trained_params, eval_keys)
             jax.block_until_ready(safe_evaluator_output)
             # Log the results of the evaluation.
+
+            ev = safe_evaluator_output.episode_metrics
+            fig = plt.figure(figsize=(8, 8), clear=True, num=0)
+            ax = fig.add_subplot(111)
+            rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
+                                linewidth=2, edgecolor='green', facecolor='white')
+            ax.add_patch(rectangle)
+            quiver_plot = ax.quiver(ev["x_grid"], ev["z_grid"], ev["arrowDirX"], ev["arrowDirY"], ev["threshold"], cmap="viridis",
+                                    angles="xy", scale_units="xy", scale=25)
+            # Set the plot boundaries
+            plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
+            plt.colorbar(quiver_plot, label="Safe actions from value in direction of arrow")
+            plt.xlabel("X")
+            plt.ylabel("Theta")
+            plt.title("Cartpole Border Decisions")
+            # Show the plot
+            img = wandb.Image(plt)
+            #wandb.log({"test":img})
+            safe_evaluator_output.episode_metrics["Image"] = img
+
+
             elapsed_time = time.time() - start_time
             episode_return = log_evaluation_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, safe_evaluator_output,logger)
             print(f"Episode Return of Training safety starting from mistake starting states: {episode_return}")
@@ -366,7 +409,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
 
 @hydra.main(
     config_path="../../configs/default/anakin",
-    config_name="default_double_learning.yaml",
+    config_name="default_double_learning2.yaml",
     version_base="1.2",
 )
 def hydra_entry_point(cfg: DictConfig) -> float:
