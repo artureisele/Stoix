@@ -80,6 +80,7 @@ class MistakeEvalState(NamedTuple):
     step_count: chex.Array
     episode_return: chex.Array
     trajectory: chex.Array
+    safe_q_value: chex.Array
 
 
 
@@ -191,7 +192,13 @@ class EvaluationOutput(NamedTuple, Generic[StoixState]):
 
     learner_state: StoixState
     episode_metrics: Dict[str, chex.Array]
+class EvaluationOutputTrajectory(NamedTuple, Generic[StoixState]):
+    """Evaluation output."""
 
+    learner_state: StoixState
+    episode_metrics: Dict[str, chex.Array]
+    trajectories: chex.Array
+    safe_q_values: chex.Array
 
 RNNObservation: TypeAlias = Tuple[Observation, Done]
 LearnerFn = Callable[[StoixState], AnakinExperimentOutput[StoixState]]

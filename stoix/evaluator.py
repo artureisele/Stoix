@@ -22,6 +22,7 @@ from stoix.base_types import (
     EvalFn,
     EvalState,
     EvaluationOutput,
+    EvaluationOutputTrajectory,
     MistakeEvalState,
     RecActFn,
     RecActorApply,
@@ -100,7 +101,7 @@ def get_ff_evaluator_fn_track_failed_trajectories(
         def _env_step(mistake_eval_state: MistakeEvalState) -> MistakeEvalState:
             """Step the environment."""
             # PRNG keys.
-            key, env_state, last_timestep, step_count, episode_return, trajectory = mistake_eval_state
+            key, env_state, last_timestep, step_count, episode_return, trajectory,safe_q_value = mistake_eval_state
 
             # Select action.
             key, policy_key = jax.random.split(key)
@@ -126,6 +127,7 @@ def get_ff_evaluator_fn_track_failed_trajectories(
                 step_count,
                 episode_return,
                 trajectory=trajectory.at[step_count-1].set(last_timestep.observation.agent_view),
+                safe_q_value=safe_q_value.at[step_count-1].set(last_timestep.extras["q_safe_value"])
             )
             return mistake_eval_state
 
@@ -147,9 +149,12 @@ def get_ff_evaluator_fn_track_failed_trajectories(
             eval_metrics["solve_episode"] = jnp.all(
                 final_state.episode_return >= config.env.solved_return_threshold
             ).astype(int)
-        return eval_metrics, trajectory
+        complete_trajectory = final_state.trajectory
+        safe_q_values = final_state.safe_q_value
+        #Trajectory is != 0 only if it failed, complete_trajectory returns the trajectory independent of failure
+        return eval_metrics, trajectory, complete_trajectory, safe_q_values
 
-    def evaluator_fn(trained_params: FrozenDict, key: chex.PRNGKey) -> EvaluationOutput[EvalState]:
+    def evaluator_fn(trained_params: FrozenDict, key: chex.PRNGKey) -> EvaluationOutputTrajectory[EvalState]:
         """Evaluator function."""
 
         # Initialise environment states and timesteps.
@@ -172,18 +177,21 @@ def get_ff_evaluator_fn_track_failed_trajectories(
             timestep=timesteps,
             step_count=jnp.zeros((eval_batch, 1), dtype=jnp.int32),
             episode_return=jnp.zeros_like(timesteps.reward),
-            trajectory=jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode, *observation_shape))
+            trajectory=jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode, *observation_shape)),
+            safe_q_value =jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode))
         )
-        eval_metrics, final_mistake_trajectories = jax.vmap(
+        eval_metrics, final_mistake_trajectories, complete_trajectories, safe_q_values = jax.vmap(
             eval_one_episode,
             in_axes=(None, 0),
-            out_axes=(0,0),
+            out_axes=(0,0,0,0),
             axis_name="eval_batch",
         )(trained_params, mistake_eval_state)
 
-        return EvaluationOutput(
+        return EvaluationOutputTrajectory(
             learner_state=final_mistake_trajectories,
             episode_metrics=eval_metrics,
+            trajectories=complete_trajectories,
+            safe_q_values = safe_q_values
         )
 
     return evaluator_fn

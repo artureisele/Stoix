@@ -58,12 +58,14 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     Source: github.com/openai/gym/blob/master/gym/envs/classic_control/cartpole.py
     """
 
-    def __init__(self, eval = True, focus = 1.5, safety_filter_function = None, safety_filter_params = None):
+    def __init__(self, eval = True, focus = 1.5, safety_filter_function = None, safety_filter_params = None,safe_filter_q = None,safe_filter_q_params = None):
         super().__init__()
         self.obs_shape = (4,)
         self.focus = focus
         self.safety_filter_function = safety_filter_function
         self.safety_filter_params = safety_filter_params
+        self.safe_filter_q = safe_filter_q
+        self.safe_filter_q_params = safe_filter_q_params
 
     @property
     def default_params(self) -> EnvParams:
@@ -93,6 +95,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
                 action_mask=jnp.array([True, True]),
                 step_count=jnp.array(0)
             )
+            q_value_safety = self.safe_filter_q(self.safe_filter_q_params, observation)
             action_safety_filter = self.safety_filter_function(
                 self.safety_filter_params,
                 observation,
@@ -175,7 +178,8 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             lax.stop_gradient(state),
             jnp.array(reward),
             done,
-            {"discount": self.discount(state, params)},
+            {#"discount": self.discount(state, params),
+             "q_safe_value": q_value_safety},
         )
 
     def reset_env(

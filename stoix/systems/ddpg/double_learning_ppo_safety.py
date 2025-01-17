@@ -25,6 +25,7 @@ from jumanji.env import Environment
 from jumanji.types import TimeStep
 from omegaconf import DictConfig, OmegaConf
 from rich.pretty import pprint
+import pickle
 
 from stoix.base_types import (
     ActorApply,
@@ -51,10 +52,10 @@ from stoix.utils.total_timestep_checker import check_total_timesteps
 from stoix.utils.training import make_learning_rate
 from stoix.wrappers.episode_metrics import get_final_step_metrics
 
-from stoix.systems.ppo.anakin.ff_ppo_continuous import learner_setup as learner_setup_s
-from stoix.systems.ppo.anakin.ff_ppo_continuous import get_learner_fn as get_learner_fn_s
-#from stoix.systems.ppo.anakin.ff_ppo_continuous import get_warmup_fn as get_warmup_fn_s
-#from stoix.systems.ppo.anakin.ff_ppo_continuous import get_default_behavior_policy as get_default_behavior_policy_s
+from stoix.systems.ppo.anakin.ff_ppo_continuous_kl_early_stopping import learner_setup as learner_setup_s
+from stoix.systems.ppo.anakin.ff_ppo_continuous_kl_early_stopping import get_learner_fn as get_learner_fn_s
+#from stoix.systems.ppo.anakin.ff_ppo_continuous_kl_early_stopping import get_warmup_fn as get_warmup_fn_s
+#from stoix.systems.ppo.anakin.ff_ppo_continuous_kl_early_stopping import get_default_behavior_policy as get_default_behavior_policy_s
 
 from stoix.systems.sac.ff_sac_delayed import learner_setup as learner_setup_p
 from stoix.systems.sac.ff_sac_delayed import get_learner_fn as get_learner_fn_p
@@ -168,10 +169,12 @@ def log_evaluation_metrics_safety_training(config_s,config_p, elapsed_time, eval
     logger.log(safe_evaluator_output.episode_metrics, t, eval_step, LogEvent.EVAL_SAFE)
     return episode_return
 
-def generate_performance_learner_and_evaluator(config_s, key, config_p, safe_actor_network, safe_learner_state):
+def generate_performance_learner_and_evaluator(config_s, key, config_p, safe_actor_network, safe_q_network, safe_learner_state):
     custom_extras = {
         "safety_filter_function" : get_distribution_act_fn(config_s, safe_actor_network.apply),
-        "safety_filter_params": unreplicate_n_dims(safe_learner_state.params.actor_params)
+        "safety_filter_params": unreplicate_n_dims(safe_learner_state.params.actor_params),
+        "safe_filter_q": safe_q_network.apply,
+        "safe_filter_q_params":unreplicate_n_dims(safe_learner_state.params.critic_params),
     }
     perf_env, perf_eval_env = environments.make(config=config_p, custom_extras = custom_extras)
 
@@ -244,6 +247,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
     safe = False
     eval_step_safety = 0
     eval_step_perf=0
+    maximal_trajectories=[]
     while(not safe):
         start_time = time.time()
         print(f"Start safety learning for eval_step: {eval_step_safety}")
@@ -297,7 +301,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         safe_learner_state = safe_learner_output.learner_state
 
     print("Start Initializing the Performance Training")
-    key, perf_learn, perf_actor_network, perf_learner_state, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network, safe_learner_state)
+    key, perf_learn, perf_actor_network, perf_learner_state, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network,safe_q_network, safe_learner_state)
     
     print("Start first performance training for biasing the first learned performance polciy")
     start_time = time.time()
@@ -321,7 +325,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         print(f"Start {i}th round of Double Learning")
         while True:
 
-            key, perf_learn, _, _, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network, safe_learner_state)
+            key, perf_learn, _, _, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network,safe_q_network, safe_learner_state)
 
             key, perf_trained_params, perf_eval_keys = prepare_performance_evaluation(config_p, key, perf_learner_output)
 
@@ -334,9 +338,15 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             final_mistake_trajectories = perf_evaluator_output.learner_state
             final_mistake_trajectories_flatten = final_mistake_trajectories.reshape(-1, final_mistake_trajectories.shape[-1])
             final_mistake_trajectories = final_mistake_trajectories_flatten[jnp.any(final_mistake_trajectories_flatten!=0,axis=1)]
+            safe_q_values = perf_evaluator_output.safe_q_values
+            jax.debug.breakpoint()
+            print(safe_q_values)
             if len(final_mistake_trajectories)>5:
                 random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(5,), replace=False)
                 final_mistake_trajectories = final_mistake_trajectories[random_indices]
+            all_trajectories = perf_evaluator_output.trajectories
+
+            maximal_trajectories.append(all_trajectories[0][(perf_evaluator_output.episode_metrics["episode_return"]).argmax()].tolist())
 
             # Log the results of the evaluation.
             elapsed_time = time.time() - start_time
@@ -404,6 +414,10 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         perf_learner_state = perf_learner_output.learner_state
     # Stop the logger.
     logger.stop()
+    #Safe the trajectories for later videos
+    with open("experienced_trajectories.pkl", "wb") as file:
+        pickle.dump(maximal_trajectories, file)
+
     return eval_step_safety
 
 
@@ -446,4 +460,5 @@ def hydra_entry_point(cfg: DictConfig) -> float:
 
 
 if __name__ == "__main__":
+    print(jax.default_backend())
     hydra_entry_point()

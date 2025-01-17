@@ -131,7 +131,7 @@ def get_learner_fn(
             truncation_flags=traj_batch.truncated,
         )
 
-        def _update_epoch(update_state: Tuple, _: Any) -> Tuple:
+        def _update_epoch(update_state: Tuple) -> Tuple:
             """Update the network for a single epoch."""
 
             def _update_minibatch(train_state: Tuple, batch_info: Tuple) -> Tuple:
@@ -156,12 +156,16 @@ def get_learner_fn(
                     loss_actor = ppo_clip_loss(
                         log_prob, traj_batch.log_prob, gae, config.system.clip_eps
                     )
+
+                    kl_rough_estimate = (log_prob-traj_batch.log_prob).mean()
+
                     entropy = actor_policy.entropy(seed=rng_key).mean()
 
                     total_loss_actor = loss_actor - config.system.ent_coef * entropy
                     loss_info = {
                         "actor_loss": loss_actor,
                         "entropy": entropy,
+                        "kl": kl_rough_estimate,
                     }
 
                     return total_loss_actor, loss_info
@@ -245,7 +249,7 @@ def get_learner_fn(
                 }
                 return (new_params, new_opt_state, key), loss_info
 
-            params, opt_states, traj_batch, advantages, targets, key = update_state
+            params, opt_states, traj_batch, advantages, targets, key, kl_estimate = update_state
             key, shuffle_key = jax.random.split(key)
 
             # SHUFFLE MINIBATCHES
@@ -266,17 +270,30 @@ def get_learner_fn(
                 _update_minibatch, (params, opt_states, key), minibatches
             )
 
-            update_state = (params, opt_states, traj_batch, advantages, targets, key)
+            update_state = (params, opt_states, traj_batch, advantages, targets, key, loss_info["kl"])
             return update_state, loss_info
 
-        update_state = (params, opt_states, traj_batch, advantages, targets, key)
+        update_state = (params, opt_states, traj_batch, advantages, targets, key, jnp.atleast_1d(jnp.zeros((1,),dtype=jnp.float32)))
 
+        def _update_nothing(update_state: Tuple):
+            loss_info_fake = {
+                        "value_loss": jnp.atleast_1d(jnp.zeros((1,),dtype=jnp.float32)),
+                        "actor_loss":jnp.atleast_1d(jnp.zeros((1,),dtype=jnp.float32)),
+                        "entropy":jnp.atleast_1d(jnp.zeros((1,),dtype=jnp.float32)),
+                        "kl":jnp.atleast_1d(jnp.zeros((1,),dtype=jnp.float32)),
+            }
+            return update_state, loss_info_fake
+
+        def _update_epoch_eventually(update_state: Tuple, _: Any):
+            params, opt_states, traj_batch, advantages, targets, key, kl_estimate = update_state
+            termination_cond = jnp.any(kl_estimate>=1.2*0.01)
+            return jax.lax.cond(termination_cond, _update_nothing, _update_epoch, update_state)
         # UPDATE EPOCHS
         update_state, loss_info = jax.lax.scan(
-            _update_epoch, update_state, None, config.system.epochs
+            _update_epoch_eventually, update_state, None, config.system.epochs
         )
 
-        params, opt_states, traj_batch, advantages, targets, key = update_state
+        params, opt_states, traj_batch, advantages, targets, key, kl_estimate = update_state
         learner_state = OnPolicyLearnerState(params, opt_states, key, env_state, last_timestep)
         metric = traj_batch.info
         return learner_state, (metric, loss_info)
