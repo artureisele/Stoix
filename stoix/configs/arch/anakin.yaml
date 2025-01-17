@@ -12,7 +12,7 @@ num_updates: 1e6 # Number of updates
 evaluation_greedy: True # Evaluate the policy greedily. If True the policy will select
   # an action which corresponds to the greatest logit. If false, the policy will sample
   # from the logits.
-num_eval_episodes: 20 # Number of episodes to evaluate per evaluation.
-num_evaluation: 25 # Number of evenly spaced evaluations to perform during training.
+num_eval_episodes: 200 # Number of episodes to evaluate per evaluation.
+num_evaluation: 125 # Number of evenly spaced evaluations to perform during training.
 absolute_metric: True # Whether the absolute metric should be computed. For more details
   # on the absolute metric please see: https://arxiv.org/abs/2209.10485

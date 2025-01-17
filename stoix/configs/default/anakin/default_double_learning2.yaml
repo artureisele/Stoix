@@ -13,4 +13,4 @@ hydra:
 #system_choice: ["sac/ff_sac", "ddpg/ff_td3"]
 #network_choice: ["mlp_sac","mlp_ddpg"]
 #env_choice:  ["cartpole_hyperplane", "cartpole_performance"]
-number_double_learning_iterations: 50
+number_double_learning_iterations: 20

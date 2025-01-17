@@ -3,7 +3,7 @@ defaults:
   - arch: anakin
   - system: ddpg/ff_td3
   - network: mlp_ddpg
-  - env: custom_performance/cartpole
+  - env: custom_safety/cartpole
   - _self_
 
 hydra:

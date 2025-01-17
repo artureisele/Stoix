@@ -339,8 +339,8 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             final_mistake_trajectories_flatten = final_mistake_trajectories.reshape(-1, final_mistake_trajectories.shape[-1])
             final_mistake_trajectories = final_mistake_trajectories_flatten[jnp.any(final_mistake_trajectories_flatten!=0,axis=1)]
             safe_q_values = perf_evaluator_output.safe_q_values
-            jax.debug.breakpoint()
-            print(safe_q_values)
+            #jax.debug.breakpoint()
+            #print(safe_q_values)
             if len(final_mistake_trajectories)>5:
                 random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(5,), replace=False)
                 final_mistake_trajectories = final_mistake_trajectories[random_indices]
@@ -399,7 +399,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             safe_learner_state = safe_learner_output.learner_state
             eval_step_safety+=1
 
-        key, perf_learn, _, _, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network, safe_learner_state)
+        key, perf_learn, _, _, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network, safe_q_network, safe_learner_state)
         
         print(f"Start {i} performance training in Double Learning procedure")
         start_time = time.time()
