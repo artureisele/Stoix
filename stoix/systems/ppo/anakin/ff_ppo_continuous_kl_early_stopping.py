@@ -430,7 +430,7 @@ def learner_setup(
         optax.adam(actor_lr, eps=1e-5),
     )
     critic_optim = optax.chain(
-        optax.clip_by_global_norm(config.system.max_grad_norm),
+        optax.clip_by_global_norm(config.system.max_grad_norm*100),
         optax.adam(critic_lr, eps=1e-5),
     )
 
