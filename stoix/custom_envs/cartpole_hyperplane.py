@@ -58,16 +58,11 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     Source: github.com/openai/gym/blob/master/gym/envs/classic_control/cartpole.py
     """
 
-    def __init__(self, eval = True,mistake_trajectories=None ):
+    def __init__(self, eval = True,mistake_trajectories=None, bonus = 0.5):
         super().__init__()
         self.obs_shape = (4,)
         self.mistake_trajectories = mistake_trajectories
-        self.screen = None
-        self.screen_width = 704
-        self.screen_height = 400
-        self.screen = None
-        self.clock = None
-        self.isopen = True
+        self.bonus = 0.5
 
     @property
     def default_params(self) -> EnvParams:
@@ -106,13 +101,13 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             a,a_h,b_h = inp
             return a
         
-        def bonus_given():
-            return 0.5
-        def bonus_not_given():
+        def bonus_given(bonus):
+            return bonus
+        def bonus_not_given(bonus):
             return 0.0
 
         action = jax.lax.cond(jnp.squeeze(jnp.dot(a_h, action_proposal) < b_h), proj_fn, identity_fn, operand=(action_proposal,a_h,b_h))
-        bonus = jax.lax.cond(jnp.squeeze(jnp.dot(a_h, action_proposal) < b_h), bonus_not_given, bonus_given)
+        bonus = jax.lax.cond(jnp.squeeze(jnp.dot(a_h, action_proposal) < b_h), bonus_not_given, bonus_given, operand=(self.bonus))
         force = params.force_mag * jax.numpy.squeeze(action)
         costheta = jnp.cos(state.theta)
         sintheta = jnp.sin(state.theta)
@@ -251,106 +246,3 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
                 "time": spaces.Discrete(params.max_steps_in_episode),
             }
         )
-    def render(self, state, render_mode="human"):
-        try:
-            import pygame
-            from pygame import gfxdraw
-        except ImportError as e:
-                print('pygame is not installed, run `pip install "gymnasium[classic-control]"`')
-        if self.screen is None:
-            pygame.init()
-            if render_mode == "human":
-                pygame.display.init()
-                self.screen = pygame.display.set_mode(
-                    (self.screen_width, self.screen_height)
-                )
-            else:  # mode == "rgb_array"
-                self.screen = pygame.Surface((self.screen_width, self.screen_height))
-        if self.clock is None:
-            self.clock = pygame.time.Clock()
-
-        world_width = self.default_params.x_threshold * 2 +1.2
-        scale = self.screen_width / world_width
-        carty = 100  # TOP OF CART
-        polewidth = 10.0
-        polelen = scale * 1.0
-        cartwidth = 50.0
-        cartheight = 30.0
-        if state is None:
-            return None
-        x0 = state.env_state.gymnax_env_state.x.item()
-        x2 = state.env_state.gymnax_env_state.theta.item()
-
-        self.surf = pygame.Surface((self.screen_width, self.screen_height))
-        self.surf.fill((255, 255, 255))
-
-        l, r, t, b = -cartwidth / 2, cartwidth / 2, cartheight / 2, -cartheight / 2
-        axleoffset = cartheight / 4.0
-        cartx = x0 * scale + self.screen_width / 2.0  # MIDDLE OF CART
-        carty = 100  # TOP OF CART
-        cart_coords = [(l, b), (l, t), (r, t), (r, b)]
-        cart_coords = [(c[0] + cartx, c[1] + carty) for c in cart_coords]
-        gfxdraw.aapolygon(self.surf, cart_coords, (0, 0, 0))
-        gfxdraw.filled_polygon(self.surf, cart_coords, (0, 0, 0))
-
-        l, r, t, b = (
-            -polewidth / 2,
-            polewidth / 2,
-            polelen - polewidth / 2,
-            -polewidth / 2,
-        )
-
-        pole_coords = []
-        for coord in [(l, b), (l, t), (r, t), (r, b)]:
-            coord = pygame.math.Vector2(coord).rotate_rad(-x2)
-            coord = (coord[0] + cartx, coord[1] + carty + axleoffset)
-            pole_coords.append(coord)
-        gfxdraw.aapolygon(self.surf, pole_coords, (202, 152, 101))
-        gfxdraw.filled_polygon(self.surf, pole_coords, (202, 152, 101))
-
-        gfxdraw.aacircle(
-            self.surf,
-            int(cartx),
-            int(carty + axleoffset),
-            int(polewidth / 2),
-            (129, 132, 203),
-        )
-        gfxdraw.filled_circle(
-            self.surf,
-            int(cartx),
-            int(carty + axleoffset),
-            int(polewidth / 2),
-            (129, 132, 203),
-        )
-
-        gfxdraw.hline(self.surf, 0, self.screen_width, carty, (0, 0, 0))
-        gfxdraw.vline(self.surf,int(self.default_params.x_threshold * scale + self.screen_width / 2.0), 0, self.screen_height, (255, 0, 0))
-        gfxdraw.vline(self.surf,int(-self.default_params.x_threshold * scale + self.screen_width / 2.0),0,self.screen_height, (255, 0, 0))
-        gfxdraw.vline(self.surf,int(1.7 * scale + self.screen_width / 2.0),0,self.screen_height, (0, 255, 255))
-        """
-        if self.debug_hyperplanes_render:
-            next_desired_action = self.next_desired_action
-            next_real_action = self.next_real_action
-            next_threshold = self.next_threshold
-            percentage_of_left_line = (next_threshold+1)/2.0
-            percentage_of_real_action = (next_real_action+1)/2.0
-            percentage_of_desired_action = (next_desired_action+1)/2.0
-            to_right_is_dangerous = self.to_right_is_dangerous
-            left_color = (255,0,0) if not to_right_is_dangerous else (0,255,0)
-            right_color = (255,0,0) if to_right_is_dangerous else (0,255,0)
-            gfxdraw.hline(self.surf, int(self.screen_width / 4.0), int(self.screen_width / 4.0) + int ( (self.screen_width / 4.0 * 2.0)*percentage_of_left_line), 50, left_color)
-            gfxdraw.hline(self.surf, int(self.screen_width / 4.0) + int ( (self.screen_width / 4.0 * 2.0)*percentage_of_left_line), int(self.screen_width / 4.0*3.0) , 50, right_color)
-            gfxdraw.vline(self.surf,int(self.screen_width / 4.0)+ int ( (self.screen_width / 4.0 * 2.0)*percentage_of_real_action) ,25,75,(0,0,0))
-            gfxdraw.vline(self.surf,int(self.screen_width / 4.0)+ int ( (self.screen_width / 4.0 * 2.0)*percentage_of_desired_action) ,35,65,(0,0,255))
-        """
-        self.surf = pygame.transform.flip(self.surf, False, True)
-        self.screen.blit(self.surf, (0, 0))
-        if render_mode == "human":
-            pygame.event.pump()
-            self.clock.tick(50)
-            pygame.display.flip()
-
-        elif render_mode == "rgb_array":
-            return np.transpose(
-                np.array(pygame.surfarray.pixels3d(self.screen)), axes=(1, 0, 2)
-            )

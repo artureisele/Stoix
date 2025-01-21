@@ -192,8 +192,8 @@ class WandBLogger(BaseLogger):
     def __init__(self, cfg: DictConfig, unique_token: str) -> None:
         tags = list(cfg.logger.kwargs.tags)
         project = cfg.logger.kwargs.project
-
-        wandb.init(project=project, tags=tags, config=stringify_unsupported(cfg))
+        name = cfg.logger.kwargs.name
+        wandb.init(name = name, project=project, tags=tags, config=stringify_unsupported(cfg))
 
         self.detailed_logging = cfg.logger.kwargs.detailed_logging
 

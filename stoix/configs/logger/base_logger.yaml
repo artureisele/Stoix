@@ -18,6 +18,7 @@ kwargs:
     # aggregation and plotting of data from multiple experiments. Note that when uploading JSON files,
     # `json_path` must be unset to ensure that uploaded json files don't continue getting larger
     # over time. Setting both will break.
+  name : "DefaultExpName"
 
 # --- Checkpointing ---
 checkpointing:

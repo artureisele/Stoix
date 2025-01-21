@@ -125,10 +125,10 @@ class Renderer():
             return np.transpose(
                 np.array(pygame.surfarray.pixels3d(self.screen)), axes=(1, 0, 2)
             )
-if __name__ == "__main__":
-    wandb.init(project="cleanRL")
+def uploadVideos(name):
+    wandb.init(project="cleanRL", name = name)
     renderer = Renderer()
-    with open("experienced_trajectories.pkl", "rb") as file:
+    with open("/home/artur/Schreibtisch/Stoix/experienced_trajectories.pkl", "rb") as file:
         loaded_list = pickle.load(file)
     for iteration in loaded_list:
         frames = []

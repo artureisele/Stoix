@@ -16,6 +16,6 @@ gamma: 0.99  # discount factor
 autotune: False  # whether to autotune alpha
 target_entropy_scale: 1.0  # scale factor for target entropy (when auto-tuning)
 init_alpha: 0.05  # initial entropy value when not using autotune
-max_grad_norm: 5000 #0.5 # Maximum norm of the gradients for a weight update.
+max_grad_norm: 0.5 # Maximum norm of the gradients for a weight update.
 decay_learning_rates: False # Whether learning rates should be linearly decayed during training.
 initial_learning_epochs: 1000 # How many epochs of learning just from the initial replay buffer experience, which was filled by using the uniform policy filtered by the first iteration of the safety filter.

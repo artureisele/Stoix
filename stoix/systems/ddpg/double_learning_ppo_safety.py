@@ -26,6 +26,7 @@ from jumanji.types import TimeStep
 from omegaconf import DictConfig, OmegaConf
 from rich.pretty import pprint
 import pickle
+from stoix.systems.ddpg.upload_videos_cartpole_to_wandb import uploadVideos
 
 from stoix.base_types import (
     ActorApply,
@@ -247,6 +248,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
     safe = False
     eval_step_safety = 0
     eval_step_perf=0
+    perf_eval_best_reward = 0
     maximal_trajectories=[]
     while(not safe):
         start_time = time.time()
@@ -337,37 +339,51 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             #Misuse variable here of learner_state of perf_evaluator for the observation experienced in failed trajectories
             final_mistake_trajectories = perf_evaluator_output.learner_state
             final_mistake_trajectories_flatten = final_mistake_trajectories[0]
-            indices = jnp.any(final_mistake_trajectories_flatten!=0,axis=[1,2])
-            indices2 = jnp.any(final_mistake_trajectories_flatten!=0,axis=2)
-            indices3 = jnp.any(final_mistake_trajectories_flatten!=0,axis=0)
+            safe_q_values = perf_evaluator_output.safe_q_values
+            safe_q_values_relevant = safe_q_values[0]
+            shortest_row_index = perf_evaluator_output.episode_metrics["episode_length"].argmin()
+            final_mistake_trajectories = final_mistake_trajectories_flatten[shortest_row_index]
+            safe_q_values_relevant = safe_q_values_relevant[shortest_row_index]
+            indices = jnp.any(final_mistake_trajectories!=0,axis=1)
+            print(f"Length shortest chain{len(final_mistake_trajectories[indices])}")
+            final_mistake_trajectories = final_mistake_trajectories[indices]
+            safe_q_values_relevant = safe_q_values_relevant[indices]
+            #indices = jnp.any(final_mistake_trajectories_flatten!=0,axis=[1,2])
+            #indices2 = jnp.any(final_mistake_trajectories_flatten!=0,axis=2)
+            #indices3 = jnp.any(final_mistake_trajectories_flatten!=0,axis=0)
             #jax.debug.breakpoint()
-            final_mistake_trajectories_flatten_really_terminated = final_mistake_trajectories_flatten[indices]
-            if len(final_mistake_trajectories_flatten_really_terminated)!=0:
-                first_states = final_mistake_trajectories_flatten_really_terminated[:,0,:]
-                final_mistake_trajectories_flatten_really_terminated_without_first_states = final_mistake_trajectories_flatten_really_terminated[:,1:,:]
-                safe_q_values = perf_evaluator_output.safe_q_values
-                safe_q_values_relevant = safe_q_values[0][indices]
-                safe_q_values_without_initial = safe_q_values_relevant[:,1:]
-                mistake_states_filtered_by_q = final_mistake_trajectories_flatten_really_terminated_without_first_states[jnp.logical_and(safe_q_values_without_initial<=100,safe_q_values_without_initial>=50)]
-                final_mistake_trajectories = final_mistake_trajectories_flatten[jnp.all(final_mistake_trajectories_flatten!=0,axis=2)]
+            #final_mistake_trajectories_flatten_really_terminated = final_mistake_trajectories_flatten[indices]
+            if len(final_mistake_trajectories)!=0:
+                #first_states = final_mistake_trajectories_flatten_really_terminated[:,0,:]
+                #final_mistake_trajectories_flatten_really_terminated_without_first_states = final_mistake_trajectories_flatten_really_terminated[:,1:,:]
+                #safe_q_values = perf_evaluator_output.safe_q_values
+                #safe_q_values_relevant = safe_q_values[0][indices]
+                #safe_q_values_without_initial = safe_q_values_relevant[:,1:]
+                #mistake_states_filtered_by_q = final_mistake_trajectories_flatten_really_terminated_without_first_states[jnp.logical_and(safe_q_values_without_initial<=100,safe_q_values_without_initial>=50)]
+                #final_mistake_trajectories = final_mistake_trajectories_flatten[jnp.all(final_mistake_trajectories_flatten!=0,axis=2)]
 
             #jax.debug.breakpoint()
             #print(safe_q_values)
             #if len(final_mistake_trajectories2)>5:
             #    random_indices = jax.random.choice(key, final_mistake_trajectories2.shape[0], shape=(5,), replace=False)
             #    final_mistake_trajectories2= final_mistake_trajectories[random_indices]
-                if len(first_states)>2:
-                    random_indices = jax.random.choice(key, first_states.shape[0], shape=(2,), replace=False)
-                    first_states= final_mistake_trajectories[random_indices]
-                if len(final_mistake_trajectories)>3:
-                    random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(3,), replace=False)
+                #if len(first_states)>2:
+                    #random_indices = jax.random.choice(key, first_states.shape[0], shape=(2,), replace=False)
+                    #first_states= final_mistake_trajectories[random_indices]
+                def softmax(x):
+                    exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
+                    return exp_x / exp_x.sum()
+                if len(final_mistake_trajectories)>5:
+                    random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(5,), replace=False, p = softmax(safe_q_values_relevant))
                     final_mistake_trajectories= final_mistake_trajectories[random_indices]
 
-                final_mistake_trajectories = jnp.concatenate((first_states,final_mistake_trajectories))
+                #final_mistake_trajectories = jnp.concatenate((first_states,final_mistake_trajectories))
             
             all_trajectories = perf_evaluator_output.trajectories
-            maximal_trajectories.append(all_trajectories[0][(perf_evaluator_output.episode_metrics["episode_return"]).argmax()].tolist())
-
+            result_best_local = perf_evaluator_output.episode_metrics["episode_return"].max()
+            if perf_eval_best_reward <= result_best_local:
+                maximal_trajectories.append(all_trajectories[0][(perf_evaluator_output.episode_metrics["episode_return"]).argmax()].tolist())
+                perf_eval_best_reward = result_best_local
             # Log the results of the evaluation.
             elapsed_time = time.time() - start_time
             perf_eval_length = log_evaluation_metrics_performance_agent_for_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
@@ -450,32 +466,41 @@ def hydra_entry_point(cfg: DictConfig) -> float:
     """Experiment entry point."""
     # Allow dynamic attributes.
     OmegaConf.set_struct(cfg, False)
-    for i in range(1):
-        print(cfg.network)
-        cfg_performance = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
-        cfg_safety = cfg
-        cfg_performance.arch.seed = cfg_safety.arch.seed + i * 100
-        cfg_safety.arch.seed = cfg_safety.arch.seed + i * 100
+    for j in range(10):
+        for i in range(2):
+            if j <= 4 :
+                continue
+            bonus = [0.1,0.3,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.8][j]
+            cfg_performance = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
+            cfg_safety = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
+            cfg_performance.arch.seed = cfg_safety.arch.seed + i * 100
+            cfg_safety.arch.seed = cfg_safety.arch.seed + i * 100
+            
+            cfg_performance.system = list(cfg_safety.system.items())[1][1]
+            cfg_safety.system = list(cfg_safety.system.items())[0][1]
 
-        cfg_performance.system = list(cfg_safety.system.items())[1][1]
-        cfg_safety.system = list(cfg_safety.system.items())[0][1]
+            cfg_performance.network = list(cfg_safety.network.items())[1][1]
+            cfg_safety.network = list(cfg_safety.network.items())[0][1]
 
-        cfg_performance.network = list(cfg_safety.network.items())[1][1]
-        cfg_safety.network = list(cfg_safety.network.items())[0][1]
+            #print(list(cfg_safety.env.items()))
+            cfg_performance.env = list(cfg_safety.env.items())[1][1]
+            cfg_safety.env = list(cfg_safety.env.items())[0][1]
 
-        #print(list(cfg_safety.env.items()))
-        cfg_performance.env = list(cfg_safety.env.items())[1][1]
-        cfg_safety.env = list(cfg_safety.env.items())[0][1]
+            #print("CFG Safety")
+            #print(cfg_safety)
+            #print("CFG Perf")
+            #print(cfg_performance)
+            # Run experiment.
+            #jax.debug.breakpoint()
+            cfg_safety.env.kwargs.bonus = bonus
+            cfg_safety.logger.kwargs.name =f"AblationBonusDoubleLearningJaxCartpole_Bonus{bonus},_{i}"
+            eval_performance = run_experiment(cfg_safety, cfg_performance)
+            print(f"It took {eval_performance} Iterations to learn safety")
+            print(f"{Fore.CYAN}{Style.BRIGHT}Double Learning experiment completed{Style.RESET_ALL}")
+            uploadVideos(f"AblationBonusDoubleLearningJaxCartpole_Bonus{bonus},_{i}_Videos")
+            wandb.finish()
 
-        #print("CFG Safety")
-        #print(cfg_safety)
-        #print("CFG Perf")
-        #print(cfg_performance)
-        # Run experiment.
-        #jax.debug.breakpoint()
-        eval_performance = run_experiment(cfg_safety, cfg_performance)
-        print(f"It took {eval_performance} Iterations to learn safety")
-        print(f"{Fore.CYAN}{Style.BRIGHT}Double Learning experiment completed{Style.RESET_ALL}")
+
     return eval_performance
 
 
