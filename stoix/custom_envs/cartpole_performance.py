@@ -179,7 +179,8 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             jnp.array(reward),
             done,
             {#"discount": self.discount(state, params),
-             "q_safe_value": q_value_safety},
+             "q_safe_value": q_value_safety,
+             "safe_action": action_safety_filter},
         )
 
     def reset_env(

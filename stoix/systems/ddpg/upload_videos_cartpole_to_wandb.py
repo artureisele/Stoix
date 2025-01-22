@@ -2,6 +2,7 @@ import wandb
 import imageio
 import pickle
 import numpy as np
+import math
 
 class Renderer():
     def __init__(self):
@@ -22,7 +23,10 @@ class Renderer():
         self.theta_threshold_radians: float = 24 * 2 * np.pi / 360
         self.x_threshold: float = 2.4
         self.max_steps_in_episode: int = 500  # v0 had only 200 steps!
-    def render(self, state, render_mode="human"):
+    def render(self, state, action_perf, action_safe, render_mode="human", extra_info = False):
+        if action_perf == -10 or action_safe == [0,0] or action_safe == [-10,10]:
+            return
+
         try:
             import pygame
             from pygame import gfxdraw
@@ -98,23 +102,46 @@ class Renderer():
         gfxdraw.vline(self.surf,int(self.x_threshold * scale + self.screen_width / 2.0), 0, self.screen_height, (255, 0, 0))
         gfxdraw.vline(self.surf,int(-self.x_threshold * scale + self.screen_width / 2.0),0,self.screen_height, (255, 0, 0))
         gfxdraw.vline(self.surf,int(1.7 * scale + self.screen_width / 2.0),0,self.screen_height, (0, 255, 255))
-        """
-        if self.debug_hyperplanes_render:
-            next_desired_action = self.next_desired_action
-            next_real_action = self.next_real_action
-            next_threshold = self.next_threshold
+
+        if action_safe!=[-10,-10] and extra_info:
+            next_desired_action = action_perf
+            a_h = action_safe[0]/abs(action_safe[0])
+            b_h = action_safe[1]
+            next_real_action = b_h/a_h if a_h * next_desired_action < b_h else next_desired_action
+            next_threshold = b_h/a_h
             percentage_of_left_line = (next_threshold+1)/2.0
             percentage_of_real_action = (next_real_action+1)/2.0
             percentage_of_desired_action = (next_desired_action+1)/2.0
-            to_right_is_dangerous = self.to_right_is_dangerous
+            to_right_is_dangerous = a_h < 0 # We project if a_h==1 and we are left of threshold
             left_color = (255,0,0) if not to_right_is_dangerous else (0,255,0)
             right_color = (255,0,0) if to_right_is_dangerous else (0,255,0)
             gfxdraw.hline(self.surf, int(self.screen_width / 4.0), int(self.screen_width / 4.0) + int ( (self.screen_width / 4.0 * 2.0)*percentage_of_left_line), 50, left_color)
             gfxdraw.hline(self.surf, int(self.screen_width / 4.0) + int ( (self.screen_width / 4.0 * 2.0)*percentage_of_left_line), int(self.screen_width / 4.0*3.0) , 50, right_color)
-            gfxdraw.vline(self.surf,int(self.screen_width / 4.0)+ int ( (self.screen_width / 4.0 * 2.0)*percentage_of_real_action) ,25,75,(0,0,0))
-            gfxdraw.vline(self.surf,int(self.screen_width / 4.0)+ int ( (self.screen_width / 4.0 * 2.0)*percentage_of_desired_action) ,35,65,(0,0,255))
-        """
+            gfxdraw.vline(self.surf,int(self.screen_width / 4.0)+ int ( (self.screen_width / 4.0 * 2.0)*percentage_of_real_action) ,40,60,(0,0,0))
+            gfxdraw.vline(self.surf,int(self.screen_width / 4.0)+ int ( (self.screen_width / 4.0 * 2.0)*percentage_of_desired_action) ,45,55,(0,0,255))
+
         self.surf = pygame.transform.flip(self.surf, False, True)
+        if action_safe!=[-10,-10] and extra_info:
+            font = pygame.font.Font(None, 15)  # Default font, size 36
+            text_surface = font.render("Drive Left (-1)", True, "black")
+            text_rect = text_surface.get_rect(center=(int(self.screen_width / 4.0)-40, self.screen_height-(50)))
+            self.surf.blit(text_surface, text_rect)
+            text_surface = font.render("Drive Right (+1)", True, "black")
+            text_rect = text_surface.get_rect(center=(int(self.screen_width / 4.0*3)+45, self.screen_height-(50)))
+            self.surf.blit(text_surface, text_rect)
+            text_surface = font.render("Desired Action", True, "black")
+            text_rect = text_surface.get_rect(center=(int(self.screen_width / 4.0)+ int ( (self.screen_width / 4.0 * 2.0)*percentage_of_desired_action), self.screen_height-(30)))
+            self.surf.blit(text_surface, text_rect)
+            text_surface = font.render("Filtered Action", True, "black")
+            text_rect = text_surface.get_rect(center=(int(self.screen_width / 4.0)+ int ( (self.screen_width / 4.0 * 2.0)*percentage_of_real_action), self.screen_height-(70)))
+            self.surf.blit(text_surface, text_rect)
+            font = pygame.font.Font(None, 25)
+            text_surface = font.render(f"State: [{round(state[0],2),round(state[1],2),round(state[2],2),round(state[3],2)}]", True, "black")
+            text_rect = text_surface.get_rect(center=(int(self.screen_width / 2.0), int(self.screen_height/4)))
+            self.surf.blit(text_surface, text_rect)
+            text_surface = font.render(f"Action_perf:{action_perf}, Action_safe:{action_safe}", True, "black")
+            text_rect = text_surface.get_rect(center=(int(self.screen_width / 2.0), int(self.screen_height/4)-30))
+            self.surf.blit(text_surface, text_rect)
         self.screen.blit(self.surf, (0, 0))
         if render_mode == "human":
             pygame.event.pump()
@@ -125,17 +152,33 @@ class Renderer():
             return np.transpose(
                 np.array(pygame.surfarray.pixels3d(self.screen)), axes=(1, 0, 2)
             )
-def uploadVideos(name):
-    wandb.init(project="cleanRL", name = name)
+def uploadVideos():
+    #wandb.init(project="cleanRL", name = name)
     renderer = Renderer()
     with open("/home/artur/Schreibtisch/Stoix/experienced_trajectories.pkl", "rb") as file:
-        loaded_list = pickle.load(file)
-    for iteration in loaded_list:
-        frames = []
-        for state in iteration:
-            rgb_array = renderer.render(state, render_mode="rgb_array")
-            frames.append(rgb_array)
-        video_file = "trajectory.mp4"
-        imageio.mimwrite(video_file, frames, fps=30)
-        print(f"Video saved to {video_file}")
-        wandb.log({"simulation_video": wandb.Video(video_file, fps=30, format="mp4")})
+        loaded_list1 = pickle.load(file)
+    with open("/home/artur/Schreibtisch/Stoix/experienced_actions_perf.pkl", "rb") as file:
+        loaded_list2 = pickle.load(file)
+    with open("/home/artur/Schreibtisch/Stoix/experienced_actions_safe.pkl", "rb") as file:
+        loaded_list3 = pickle.load(file)
+    for extra_info in [True, False]:
+        for iteration1, iteration2, iteration3 in zip(loaded_list1, loaded_list2, loaded_list3):
+            frames = []
+            # The actions in it3 are not for the first reset state, they start with dummy action in gymnax.py reset
+            iteration1= [[-10,-10,-10,-10]]+ iteration1
+            iteration2 = [-10] + iteration2 
+            iteration3 = iteration3 + [[-10,-10]]
+
+            for state, action_perf, actions_safe in zip(iteration1, iteration2, iteration3):
+                rgb_array = renderer.render(state,action_perf, actions_safe, render_mode="rgb_array", extra_info = extra_info)
+                if not rgb_array is None:
+                    frames.append(rgb_array)
+            video_file = "trajectory.mp4"
+
+            print(f"Video saved to {video_file}")
+            if not extra_info:
+                imageio.mimwrite(video_file, frames, fps=30)
+                wandb.log({"simulation_video": wandb.Video(video_file, format="mp4")})
+            else:
+                imageio.mimwrite(video_file, frames, fps=2)
+                wandb.log({"simulation_video_all_info": wandb.Video(video_file, format="mp4")})

@@ -1,7 +1,7 @@
 # --- Anakin config ---
 architecture_name: anakin
 # --- Training ---
-seed: 445  # RNG seed.
+seed: 123456  # RNG seed.
 update_batch_size: 1 # Number of vectorised gradient updates per device.
 total_num_envs: 1  # Total Number of vectorised environments across all devices and batched_updates. Needs to be divisible by n_devices*update_batch_size.
 total_timesteps: ~ # Set the total environment steps.

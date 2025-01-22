@@ -28,6 +28,7 @@ class LogEvent(Enum):
     ACT_Perf = "actor_perf"
     TRAIN_Perf = "trainer_perf"
     EVAL_Perf = "evaluator_perf"
+    EVAL_Perf_Greed = "evaluator_perf_greedy"
     ABSOLUTE_Perf = "absolute_perf"
     MISC_Perf = "misc_perf"
     ACT = "actor"

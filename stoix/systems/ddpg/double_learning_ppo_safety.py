@@ -234,12 +234,22 @@ def log_evaluation_metrics_performance_agent_for_safety_training(config_s,config
     perf_eval_length = jnp.average(perf_evaluator_output.episode_metrics["episode_length"])
     return perf_eval_length
 
+def log_evaluation_metrics_performance_agent_greedy(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger):
+    t = int(config_p.system.steps_per_rollout * (eval_step_perf + 1)) + int(config_s.system.steps_per_rollout * (eval_step_safety + 1))
+    eval_step = eval_step_perf+eval_step_safety
+    steps_per_eval = int(jnp.sum(perf_evaluator_output.episode_metrics["episode_length"]))
+    perf_evaluator_output.episode_metrics["steps_per_second"] = steps_per_eval / elapsed_time
+    logger.log(perf_evaluator_output.episode_metrics, t, eval_step, LogEvent.EVAL_Perf_Greed)
+
+    perf_eval_length = jnp.average(perf_evaluator_output.episode_metrics["episode_length"])
+    return perf_eval_length
+
 def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
     """Runs experiment."""
     print("Initialize the config dicts!")
     config_s,config_p, key = initialize_config_dicts(_config_s,_config_p)
     # Logger setup
-    logger = StoixLogger(config_s)
+    logger = StoixLogger(_config_s)
 
     print("Start initalizing safety training!")
     key, safe_learn, safe_actor_network, safe_q_network, safe_learner_state, safe_evaluator = generate_safety_env_and_learn(config_s, key, custom_extras={})
@@ -250,6 +260,8 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
     eval_step_perf=0
     perf_eval_best_reward = 0
     maximal_trajectories=[]
+    maximal_actions_taken_performance=[]
+    maximal_actions_taken_safety=[]
     while(not safe):
         start_time = time.time()
         print(f"Start safety learning for eval_step: {eval_step_safety}")
@@ -325,6 +337,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
     # Prepare for evaluation.
     for i in range(config_s.number_double_learning_iterations):
         print(f"Start {i}th round of Double Learning")
+        safety_assured_counter = 0
         while True:
 
             key, perf_learn, _, _, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network,safe_q_network, safe_learner_state)
@@ -336,59 +349,66 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             perf_evaluator_output = perf_evaluator(perf_trained_params, perf_eval_keys)
             jax.block_until_ready(perf_evaluator_output)
 
-            #Misuse variable here of learner_state of perf_evaluator for the observation experienced in failed trajectories
-            final_mistake_trajectories = perf_evaluator_output.learner_state
-            final_mistake_trajectories_flatten = final_mistake_trajectories[0]
-            safe_q_values = perf_evaluator_output.safe_q_values
-            safe_q_values_relevant = safe_q_values[0]
-            shortest_row_index = perf_evaluator_output.episode_metrics["episode_length"].argmin()
-            final_mistake_trajectories = final_mistake_trajectories_flatten[shortest_row_index]
-            safe_q_values_relevant = safe_q_values_relevant[shortest_row_index]
-            indices = jnp.any(final_mistake_trajectories!=0,axis=1)
-            print(f"Length shortest chain{len(final_mistake_trajectories[indices])}")
-            final_mistake_trajectories = final_mistake_trajectories[indices]
-            safe_q_values_relevant = safe_q_values_relevant[indices]
-            #indices = jnp.any(final_mistake_trajectories_flatten!=0,axis=[1,2])
-            #indices2 = jnp.any(final_mistake_trajectories_flatten!=0,axis=2)
-            #indices3 = jnp.any(final_mistake_trajectories_flatten!=0,axis=0)
-            #jax.debug.breakpoint()
-            #final_mistake_trajectories_flatten_really_terminated = final_mistake_trajectories_flatten[indices]
-            if len(final_mistake_trajectories)!=0:
-                #first_states = final_mistake_trajectories_flatten_really_terminated[:,0,:]
-                #final_mistake_trajectories_flatten_really_terminated_without_first_states = final_mistake_trajectories_flatten_really_terminated[:,1:,:]
-                #safe_q_values = perf_evaluator_output.safe_q_values
-                #safe_q_values_relevant = safe_q_values[0][indices]
-                #safe_q_values_without_initial = safe_q_values_relevant[:,1:]
-                #mistake_states_filtered_by_q = final_mistake_trajectories_flatten_really_terminated_without_first_states[jnp.logical_and(safe_q_values_without_initial<=100,safe_q_values_without_initial>=50)]
-                #final_mistake_trajectories = final_mistake_trajectories_flatten[jnp.all(final_mistake_trajectories_flatten!=0,axis=2)]
-
-            #jax.debug.breakpoint()
-            #print(safe_q_values)
-            #if len(final_mistake_trajectories2)>5:
-            #    random_indices = jax.random.choice(key, final_mistake_trajectories2.shape[0], shape=(5,), replace=False)
-            #    final_mistake_trajectories2= final_mistake_trajectories[random_indices]
-                #if len(first_states)>2:
-                    #random_indices = jax.random.choice(key, first_states.shape[0], shape=(2,), replace=False)
-                    #first_states= final_mistake_trajectories[random_indices]
-                def softmax(x):
-                    exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
-                    return exp_x / exp_x.sum()
-                if len(final_mistake_trajectories)>5:
-                    random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(5,), replace=False, p = softmax(safe_q_values_relevant))
-                    final_mistake_trajectories= final_mistake_trajectories[random_indices]
-
-                #final_mistake_trajectories = jnp.concatenate((first_states,final_mistake_trajectories))
-            
-            all_trajectories = perf_evaluator_output.trajectories
-            result_best_local = perf_evaluator_output.episode_metrics["episode_return"].max()
-            if perf_eval_best_reward <= result_best_local:
-                maximal_trajectories.append(all_trajectories[0][(perf_evaluator_output.episode_metrics["episode_return"]).argmax()].tolist())
-                perf_eval_best_reward = result_best_local
             # Log the results of the evaluation.
             elapsed_time = time.time() - start_time
             perf_eval_length = log_evaluation_metrics_performance_agent_for_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
             print(f"Performance eval length: {perf_eval_length}")
             if perf_eval_length >=config_s.env.solved_return_threshold:
+                safety_assured_counter +=1
+                all_trajectories = perf_evaluator_output.trajectories
+                argmax_eval_index = perf_evaluator_output.episode_metrics["episode_return"].argmax()
+                best_trajectory = all_trajectories[0][argmax_eval_index]
+                if len(best_trajectory)>40:
+                    best_trajectory = best_trajectory[:(best_trajectory.shape[0]//10)*10,:]
+                    best_trajectory = best_trajectory[:-30,:]
+                    section_size = best_trajectory.shape[0]/10
+                    starting_indices = jnp.arange(0,best_trajectory.shape[0], section_size)[:10]
+                    offset = jax.random.choice(key, section_size, shape=(10,), replace=True)
+                    final_mistake_trajectories = best_trajectory[(starting_indices+offset).astype(int)]
+                elif len(best_trajectory)>10:
+                    random_indices = jax.random.choice(key, best_trajectory.shape[0], shape=(10,), replace=False)
+                    final_mistake_trajectories= best_trajectory[random_indices]
+            else:#Case where we shall learn from mistakes
+                #Misuse variable here of learner_state of perf_evaluator for the observation experienced in failed trajectories
+                safety_assured_counter = 0
+                final_mistake_trajectories = perf_evaluator_output.learner_state
+                final_mistake_trajectories_flatten = final_mistake_trajectories[0]
+                safe_q_values = perf_evaluator_output.safe_q_values
+                safe_q_values_relevant = safe_q_values[0]
+                shortest_row_index = perf_evaluator_output.episode_metrics["episode_length"].argmin()
+                final_mistake_trajectories = final_mistake_trajectories_flatten[shortest_row_index]
+                safe_q_values_relevant = safe_q_values_relevant[shortest_row_index]
+                indices = jnp.any(final_mistake_trajectories!=0,axis=1)
+                print(f"Length shortest chain{len(final_mistake_trajectories[indices])}")
+                final_mistake_trajectories = final_mistake_trajectories[indices]
+                safe_q_values_relevant = safe_q_values_relevant[indices]
+                if len(final_mistake_trajectories)!=0:
+                    def softmax(x):
+                        exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
+                        return exp_x / exp_x.sum()
+                    if len(final_mistake_trajectories)>40:
+                        final_mistake_trajectories = final_mistake_trajectories[:(final_mistake_trajectories.shape[0]//10)*10,:]
+                        final_mistake_trajectories = final_mistake_trajectories[:-30,:]
+                        section_size = final_mistake_trajectories.shape[0]/10
+                        starting_indices = jnp.arange(0,final_mistake_trajectories.shape[0], section_size)[:10]
+                        offset = jax.random.choice(key, section_size, shape=(10,), replace=True)
+                        final_mistake_trajectories = final_mistake_trajectories[(starting_indices+offset).astype(int)]
+                    elif len(final_mistake_trajectories)>10:
+                        random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(10,), replace=False)
+                        final_mistake_trajectories= final_mistake_trajectories[random_indices]
+
+            all_action_taken_performance = perf_evaluator_output.action_taken_performance
+            all_action_taken_safety= perf_evaluator_output.action_taken_safety
+            all_trajectories = perf_evaluator_output.trajectories
+            result_best_local = perf_evaluator_output.episode_metrics["episode_return"].max()
+            if perf_eval_best_reward <= result_best_local:
+                argmax_eval_index = perf_evaluator_output.episode_metrics["episode_return"].argmax()
+                maximal_trajectories.append(all_trajectories[0][argmax_eval_index].tolist())
+                maximal_actions_taken_performance.append(all_action_taken_performance[0][argmax_eval_index].tolist())
+                maximal_actions_taken_safety.append(all_action_taken_safety[0][argmax_eval_index].tolist())
+                perf_eval_best_reward = result_best_local
+            print(f"Safety_Assured_counter:{safety_assured_counter}")
+            if safety_assured_counter >=1:
                 break
 
             custom_extras_safety = {"mistake_trajectories": final_mistake_trajectories}
@@ -445,15 +465,28 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         elapsed_time = time.time() - start_time    
         log_training_metrics_performance_training(config_p,config_s, elapsed_time, eval_step_perf,eval_step_safety, perf_learner_output, logger)
         
+
+        config_p.arch.evaluation_greedy = True
+        key, _, _, _, perf_evaluator_greedy=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network, safe_q_network, safe_learner_state)
+        config_p.arch.evaluation_greedy = False
+        start_time = time.time()
+        # Evaluate greedily
+        perf_evaluator_output = perf_evaluator(perf_trained_params, perf_eval_keys)
+        jax.block_until_ready(perf_evaluator_output)
+        log_evaluation_metrics_performance_agent_greedy(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
         eval_step_perf+=1
         # Update runner state to continue training.
         perf_learner_state = perf_learner_output.learner_state
     # Stop the logger.
-    logger.stop()
     #Safe the trajectories for later videos
     with open("experienced_trajectories.pkl", "wb") as file:
         pickle.dump(maximal_trajectories, file)
-
+    with open("experienced_actions_perf.pkl", "wb") as file:
+        pickle.dump(maximal_actions_taken_performance, file)
+    with open("experienced_actions_safe.pkl", "wb") as file:
+        pickle.dump(maximal_actions_taken_safety, file)
+    uploadVideos()#f"AblationBonusDoubleLearningJaxCartpole_Bonus{bonus},_{i}_Videos")
+    logger.stop()
     return eval_step_safety
 
 
@@ -468,8 +501,9 @@ def hydra_entry_point(cfg: DictConfig) -> float:
     OmegaConf.set_struct(cfg, False)
     for j in range(10):
         for i in range(2):
-            if j <= 4 :
+            if j <= 3  or i == 0:
                 continue
+            
             bonus = [0.1,0.3,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.8][j]
             cfg_performance = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
             cfg_safety = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
@@ -497,8 +531,6 @@ def hydra_entry_point(cfg: DictConfig) -> float:
             eval_performance = run_experiment(cfg_safety, cfg_performance)
             print(f"It took {eval_performance} Iterations to learn safety")
             print(f"{Fore.CYAN}{Style.BRIGHT}Double Learning experiment completed{Style.RESET_ALL}")
-            uploadVideos(f"AblationBonusDoubleLearningJaxCartpole_Bonus{bonus},_{i}_Videos")
-            wandb.finish()
 
 
     return eval_performance

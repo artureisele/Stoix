@@ -88,7 +88,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
 
         action_proposal = jax.random.uniform(key, (1), minval=-1.0, maxval=1.0)
         action_proposal_freedom = jax.random.uniform(key, (100,1), minval=-1.0, maxval=1.0)
-        freedom_factor = 1-(jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100)
+        filter_factor = jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.5]))-0.5
 
         def proj_fn(inp):
             a,a_h,b_h = inp
@@ -106,9 +106,9 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         def bonus_not_given(bonus):
             return 0.0
 
-        action = jax.lax.cond(jnp.squeeze(jnp.dot(a_h, action_proposal) < b_h), proj_fn, identity_fn, operand=(action_proposal,a_h,b_h))
+        action_maybe_projected = jax.lax.cond(jnp.squeeze(jnp.dot(a_h, action_proposal) < b_h), proj_fn, identity_fn, operand=(action_proposal,a_h,b_h))
         bonus = jax.lax.cond(jnp.squeeze(jnp.dot(a_h, action_proposal) < b_h), bonus_not_given, bonus_given, operand=(self.bonus))
-        force = params.force_mag * jax.numpy.squeeze(action)
+        force = params.force_mag * jax.numpy.squeeze(action_maybe_projected)
         costheta = jnp.cos(state.theta)
         sintheta = jnp.sin(state.theta)
 
@@ -132,7 +132,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         
         if params.reward_with_bonus:
             #reward += 0.8 * jnp.tanh(10*freedom_factor)
-            reward += bonus
+            reward -=filter_factor
 
         # Update state dict and evaluate termination conditions
         state = EnvState(
@@ -150,7 +150,8 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             jnp.array(reward),
             done,
             #{"discount": self.discount(state, params)}
-            {"q_safe_value":-10000}
+            {"q_safe_value":-10000,
+             "safe_action": action}
         )
 
     def reset_env(
