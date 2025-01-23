@@ -88,7 +88,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
 
         action_proposal = jax.random.uniform(key, (1), minval=-1.0, maxval=1.0)
         action_proposal_freedom = jax.random.uniform(key, (100,1), minval=-1.0, maxval=1.0)
-        filter_factor = jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.5]))-0.5
+        filter_factor = jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.4]))-0.4
 
         def proj_fn(inp):
             a,a_h,b_h = inp

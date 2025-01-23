@@ -353,6 +353,8 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             elapsed_time = time.time() - start_time
             perf_eval_length = log_evaluation_metrics_performance_agent_for_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
             print(f"Performance eval length: {perf_eval_length}")
+
+            """
             if perf_eval_length >=config_s.env.solved_return_threshold:
                 safety_assured_counter +=1
                 all_trajectories = perf_evaluator_output.trajectories
@@ -375,27 +377,52 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
                 final_mistake_trajectories_flatten = final_mistake_trajectories[0]
                 safe_q_values = perf_evaluator_output.safe_q_values
                 safe_q_values_relevant = safe_q_values[0]
-                shortest_row_index = perf_evaluator_output.episode_metrics["episode_length"].argmin()
+                episode_lengths_smaller500 = perf_evaluator_output.episode_metrics["episode_length"][0,:,0][perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+                final_mistake_trajectories_flatten = final_mistake_trajectories_flatten[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+                shortest_row_index = episode_lengths_smaller500.argsort()[int(episode_lengths_smaller500.shape[0]//2)]
                 final_mistake_trajectories = final_mistake_trajectories_flatten[shortest_row_index]
                 safe_q_values_relevant = safe_q_values_relevant[shortest_row_index]
                 indices = jnp.any(final_mistake_trajectories!=0,axis=1)
-                print(f"Length shortest chain{len(final_mistake_trajectories[indices])}")
+                print(f"Length median chain{len(final_mistake_trajectories[indices])}")
+
                 final_mistake_trajectories = final_mistake_trajectories[indices]
                 safe_q_values_relevant = safe_q_values_relevant[indices]
                 if len(final_mistake_trajectories)!=0:
                     def softmax(x):
                         exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
                         return exp_x / exp_x.sum()
-                    if len(final_mistake_trajectories)>40:
-                        final_mistake_trajectories = final_mistake_trajectories[:(final_mistake_trajectories.shape[0]//10)*10,:]
-                        final_mistake_trajectories = final_mistake_trajectories[:-30,:]
-                        section_size = final_mistake_trajectories.shape[0]/10
-                        starting_indices = jnp.arange(0,final_mistake_trajectories.shape[0], section_size)[:10]
-                        offset = jax.random.choice(key, section_size, shape=(10,), replace=True)
+                    if len(final_mistake_trajectories)>55:
+                        final_mistake_trajectories = final_mistake_trajectories[:(final_mistake_trajectories.shape[0]//5)*5,:]
+                        final_mistake_trajectories = final_mistake_trajectories[:-50,:]
+                        section_size = final_mistake_trajectories.shape[0]/5
+                        starting_indices = jnp.arange(0,final_mistake_trajectories.shape[0], section_size)[:5]
+                        offset = jax.random.choice(key, section_size, shape=(5,), replace=True)
                         final_mistake_trajectories = final_mistake_trajectories[(starting_indices+offset).astype(int)]
-                    elif len(final_mistake_trajectories)>10:
-                        random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(10,), replace=False)
+                    elif len(final_mistake_trajectories)>5:
+                        random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(5,), replace=False)
                         final_mistake_trajectories= final_mistake_trajectories[random_indices]
+            """
+            final_mistake_trajectories = perf_evaluator_output.learner_state[0]
+            safe_q_values = perf_evaluator_output.safe_q_values[0]
+
+            safe_q_values_relevant = safe_q_values[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+            final_mistake_trajectories_relevant = final_mistake_trajectories[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+            indices = jnp.logical_and(safe_q_values_relevant<=90,safe_q_values_relevant>=35)
+            final_mistake_trajectories = final_mistake_trajectories_relevant[indices].reshape(-1,4)
+            safe_q_values_relevant = safe_q_values_relevant[indices].reshape(-1)
+            print(f"Length potential starting states{len(final_mistake_trajectories)}")
+
+            if len(final_mistake_trajectories)!=0:
+                def softmax(x):
+                    exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
+                    return exp_x / exp_x.sum()
+                if len(final_mistake_trajectories)>100:
+                    random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(100,), replace=False, p = softmax(100-safe_q_values_relevant))
+                    final_mistake_trajectories= final_mistake_trajectories[random_indices]
+            elif len(final_mistake_trajectories_relevant)!=0:
+                random_indices = jax.random.choice(key, final_mistake_trajectories_relevant[0].shape[0], shape=(100,), replace=False)
+                final_mistake_trajectories= final_mistake_trajectories_relevant[0][random_indices]
+
 
             all_action_taken_performance = perf_evaluator_output.action_taken_performance
             all_action_taken_safety= perf_evaluator_output.action_taken_safety
@@ -407,8 +434,8 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
                 maximal_actions_taken_performance.append(all_action_taken_performance[0][argmax_eval_index].tolist())
                 maximal_actions_taken_safety.append(all_action_taken_safety[0][argmax_eval_index].tolist())
                 perf_eval_best_reward = result_best_local
-            print(f"Safety_Assured_counter:{safety_assured_counter}")
-            if safety_assured_counter >=1:
+
+            if perf_eval_length >=config_s.env.solved_return_threshold:
                 break
 
             custom_extras_safety = {"mistake_trajectories": final_mistake_trajectories}
@@ -500,15 +527,15 @@ def hydra_entry_point(cfg: DictConfig) -> float:
     # Allow dynamic attributes.
     OmegaConf.set_struct(cfg, False)
     for j in range(10):
-        for i in range(2):
-            if j <= 3  or i == 0:
+        for i in range(6):
+            if j <= 5 or j>6:
                 continue
             
             bonus = [0.1,0.3,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.8][j]
             cfg_performance = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
             cfg_safety = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
-            cfg_performance.arch.seed = cfg_safety.arch.seed + i * 100
-            cfg_safety.arch.seed = cfg_safety.arch.seed + i * 100
+            cfg_performance.arch.seed = cfg_safety.arch.seed + (i+1) * 34
+            cfg_safety.arch.seed = cfg_safety.arch.seed + (i+1) * 34
             
             cfg_performance.system = list(cfg_safety.system.items())[1][1]
             cfg_safety.system = list(cfg_safety.system.items())[0][1]
@@ -527,7 +554,7 @@ def hydra_entry_point(cfg: DictConfig) -> float:
             # Run experiment.
             #jax.debug.breakpoint()
             cfg_safety.env.kwargs.bonus = bonus
-            cfg_safety.logger.kwargs.name =f"AblationBonusDoubleLearningJaxCartpole_Bonus{bonus},_{i}"
+            cfg_safety.logger.kwargs.name =f"AblationRangeOfVValuesWithFilterFactor_{i}"
             eval_performance = run_experiment(cfg_safety, cfg_performance)
             print(f"It took {eval_performance} Iterations to learn safety")
             print(f"{Fore.CYAN}{Style.BRIGHT}Double Learning experiment completed{Style.RESET_ALL}")
