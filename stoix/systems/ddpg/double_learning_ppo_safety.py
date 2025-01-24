@@ -244,6 +244,126 @@ def log_evaluation_metrics_performance_agent_greedy(config_s,config_p, elapsed_t
     perf_eval_length = jnp.average(perf_evaluator_output.episode_metrics["episode_length"])
     return perf_eval_length
 
+def plot_border_decisions(ev):
+    fig = plt.figure(figsize=(8, 8), clear=True, num=0)
+    ax = fig.add_subplot(111)
+    rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
+                        linewidth=2, edgecolor='green', facecolor='white')
+    ax.add_patch(rectangle)
+    quiver_plot = ax.quiver(ev["_x_grid"], ev["_z_grid"], ev["_arrowDirX"], ev["_arrowDirY"], ev["_threshold"], cmap="viridis",
+                            angles="xy", scale_units="xy", scale=25)
+    # Set the plot boundaries
+    plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
+    plt.colorbar(quiver_plot, label="Safe actions from value in direction of arrow")
+    plt.xlabel("X")
+    plt.ylabel("Theta")
+    plt.title("Cartpole Border Decisions")
+    # Show the plot
+    img = wandb.Image(plt)
+    #wandb.log({"test":img})
+    ev["Cartpole_Border_Decisions"] = img
+
+def plot_eval_trajectories(perf_evaluator_output):
+    fig = plt.figure(figsize=(8, 8), clear=True, num=0)
+    ax = fig.add_subplot(111)
+    rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
+                        linewidth=2, edgecolor='green', facecolor='white')
+    ax.add_patch(rectangle)
+    all_action_taken_performance = perf_evaluator_output.action_taken_performance[0]
+    all_action_taken_safety= perf_evaluator_output.action_taken_safety[0]
+    all_trajectories = perf_evaluator_output.trajectories[0]
+    safe_v_values = perf_evaluator_output.safe_q_values[0]
+    all_trajectories_reshaped = all_trajectories.reshape(-1,4)
+    safe_v_values_reshaped = safe_v_values.reshape(-1,1)
+    indices = jnp.any(all_trajectories_reshaped!=0,axis=1)
+    all_trajectories_x = all_trajectories_reshaped[indices][:,0].tolist()
+    all_trajectories_theta = all_trajectories_reshaped[indices][:,2].tolist()
+    safe_v_values_without_zeros = safe_v_values_reshaped[indices]
+    # Set the plot boundaries
+    eval_traj_plot = plt.scatter(all_trajectories_x, all_trajectories_theta, c=safe_v_values_without_zeros, cmap="viridis", s=5)
+    plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
+    plt.colorbar(eval_traj_plot, label="V Value")
+    plt.xlabel("X")
+    plt.ylabel("Theta")
+    plt.title("Eval Trajectories all")
+    # Show the plot
+    img = wandb.Image(plt)
+    #wandb.log({"test":img})
+    perf_evaluator_output.episode_metrics["Eval_Trajectories"] = img
+
+def plot_eval_trajectories_candidates_mistake_trajectories(perf_evaluator_output):
+    fig = plt.figure(figsize=(8, 8), clear=True, num=0)
+    ax = fig.add_subplot(111)
+    rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
+                        linewidth=2, edgecolor='green', facecolor='white')
+    ax.add_patch(rectangle)
+
+    all_action_taken_performance = perf_evaluator_output.action_taken_performance[0]
+    all_action_taken_safety= perf_evaluator_output.action_taken_safety[0]
+    all_trajectories = perf_evaluator_output.trajectories[0]
+    safe_v_values = perf_evaluator_output.safe_q_values[0]
+
+    relevant_ep_lengths = perf_evaluator_output.episode_metrics["episode_length"][0,:,0][ perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+    safe_v_values= safe_v_values[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+    all_trajectories = all_trajectories[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+    all_trajectories = all_trajectories[jnp.arange(all_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-25),a_min=0).astype(int)]
+    safe_v_values = safe_v_values[jnp.arange(safe_v_values.shape[0]),jnp.clip((relevant_ep_lengths-25),a_min=0).astype(int)]
+    #jax.debug.breakpoint()
+
+
+    all_trajectories_reshaped = all_trajectories.reshape(-1,4)
+    safe_v_values_reshaped = safe_v_values.reshape(-1,1)
+    all_trajectories_x = all_trajectories_reshaped[:,0].tolist()
+    all_trajectories_theta = all_trajectories_reshaped[:,2].tolist()
+    safe_v_values_without_zeros = safe_v_values_reshaped.tolist()
+    # Set the plot boundaries
+    eval_traj_plot = plt.scatter(all_trajectories_x, all_trajectories_theta, c=safe_v_values_without_zeros, cmap="viridis", s=10)
+    plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
+    plt.colorbar(eval_traj_plot, label="V Value")
+    plt.xlabel("X")
+    plt.ylabel("Theta")
+    plt.title("Eval Trajectories Candidates End 25")
+    # Show the plot
+    img = wandb.Image(plt)
+    #wandb.log({"test":img})
+    perf_evaluator_output.episode_metrics["Eval_Trajectories_End_25"] = img
+
+def plot_eval_trajectories_candidates_mistake_trajectories2(perf_evaluator_output):
+    fig = plt.figure(figsize=(8, 8), clear=True, num=0)
+    ax = fig.add_subplot(111)
+    rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
+                        linewidth=2, edgecolor='green', facecolor='white')
+    ax.add_patch(rectangle)
+
+    all_action_taken_performance = perf_evaluator_output.action_taken_performance[0]
+    all_action_taken_safety= perf_evaluator_output.action_taken_safety[0]
+    all_trajectories = perf_evaluator_output.trajectories[0]
+    safe_v_values = perf_evaluator_output.safe_q_values[0]
+
+    relevant_ep_lengths = perf_evaluator_output.episode_metrics["episode_length"][0,:,0][ perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+    safe_v_values= safe_v_values[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+    all_trajectories = all_trajectories[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+    all_trajectories = all_trajectories[jnp.arange(all_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-50),a_min=0).astype(int)]
+    safe_v_values = safe_v_values[jnp.arange(safe_v_values.shape[0]),jnp.clip((relevant_ep_lengths-50),a_min=0).astype(int)]
+
+
+    all_trajectories_reshaped = all_trajectories.reshape(-1,4)
+    safe_v_values_reshaped = safe_v_values.reshape(-1,1)
+    all_trajectories_x = all_trajectories_reshaped[:,0].tolist()
+    all_trajectories_theta = all_trajectories_reshaped[:,2].tolist()
+    safe_v_values_without_zeros = safe_v_values_reshaped.tolist()
+    # Set the plot boundaries
+    eval_traj_plot = plt.scatter(all_trajectories_x, all_trajectories_theta, c=safe_v_values_without_zeros, cmap="viridis", s=10)
+    plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
+    plt.colorbar(eval_traj_plot, label="V Value")
+    plt.xlabel("X")
+    plt.ylabel("Theta")
+    plt.title("Eval Trajectories Candidates End 50")
+    # Show the plot
+    img = wandb.Image(plt)
+    #wandb.log({"test":img})
+    perf_evaluator_output.episode_metrics["Eval_Trajectories_End_50"] = img
+
 def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
     """Runs experiment."""
     print("Initialize the config dicts!")
@@ -279,24 +399,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         safe_evaluator_output = safe_evaluator(safe_trained_params, eval_keys)
         jax.block_until_ready(safe_evaluator_output)
 
-        ev = safe_evaluator_output.episode_metrics
-        fig = plt.figure(figsize=(8, 8), clear=True, num=0)
-        ax = fig.add_subplot(111)
-        rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
-                            linewidth=2, edgecolor='green', facecolor='white')
-        ax.add_patch(rectangle)
-        quiver_plot = ax.quiver(ev["x_grid"], ev["z_grid"], ev["arrowDirX"], ev["arrowDirY"], ev["threshold"], cmap="viridis",
-                                angles="xy", scale_units="xy", scale=25)
-        # Set the plot boundaries
-        plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
-        plt.colorbar(quiver_plot, label="Safe actions from value in direction of arrow")
-        plt.xlabel("X")
-        plt.ylabel("Theta")
-        plt.title("Cartpole Border Decisions")
-        # Show the plot
-        img = wandb.Image(plt)
-        #wandb.log({"test":img})
-        safe_evaluator_output.episode_metrics["Image"] = img
+        plot_border_decisions(safe_evaluator_output.episode_metrics)
 
 
 
@@ -348,7 +451,9 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             # Evaluate.
             perf_evaluator_output = perf_evaluator(perf_trained_params, perf_eval_keys)
             jax.block_until_ready(perf_evaluator_output)
-
+            plot_eval_trajectories(perf_evaluator_output)
+            plot_eval_trajectories_candidates_mistake_trajectories2(perf_evaluator_output)
+            plot_eval_trajectories_candidates_mistake_trajectories(perf_evaluator_output)
             # Log the results of the evaluation.
             elapsed_time = time.time() - start_time
             perf_eval_length = log_evaluation_metrics_performance_agent_for_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
@@ -405,11 +510,17 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             final_mistake_trajectories = perf_evaluator_output.learner_state[0]
             safe_q_values = perf_evaluator_output.safe_q_values[0]
 
-            safe_q_values_relevant = safe_q_values[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
-            final_mistake_trajectories_relevant = final_mistake_trajectories[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
-            indices = jnp.logical_and(safe_q_values_relevant<=90,safe_q_values_relevant>=35)
-            final_mistake_trajectories = final_mistake_trajectories_relevant[indices].reshape(-1,4)
-            safe_q_values_relevant = safe_q_values_relevant[indices].reshape(-1)
+            #safe_q_values_relevant = safe_q_values[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+            relevant_ep_lengths = perf_evaluator_output.episode_metrics["episode_length"][0,:,0][ perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+            final_mistake_trajectories = final_mistake_trajectories[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+            final_mistake_trajectories_ends = final_mistake_trajectories[jnp.arange(final_mistake_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-50),a_min=0).astype(int)]
+            final_mistake_trajectories_starts = final_mistake_trajectories[jnp.arange(final_mistake_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-10000),a_min=0).astype(int)]
+            #indices = jnp.logical_and(safe_q_values_relevant<=90,safe_q_values_relevant>=35)
+            #final_mistake_trajectories = final_mistake_trajectories_relevant[indices].reshape(-1,4)
+            final_mistake_trajectories_starts = final_mistake_trajectories_starts.reshape(-1,4)
+            final_mistake_trajectories_ends = final_mistake_trajectories_ends.reshape(-1,4)
+            final_mistake_trajectories = jnp.concatenate(jnp.array([final_mistake_trajectories_starts, final_mistake_trajectories_ends]), axis=0)
+            #safe_q_values_relevant = safe_q_values_relevant[indices].reshape(-1)
             print(f"Length potential starting states{len(final_mistake_trajectories)}")
 
             if len(final_mistake_trajectories)!=0:
@@ -417,11 +528,11 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
                     exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
                     return exp_x / exp_x.sum()
                 if len(final_mistake_trajectories)>100:
-                    random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(100,), replace=False, p = softmax(100-safe_q_values_relevant))
+                    random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(100,), replace=False)# p = softmax(100-safe_q_values_relevant))
                     final_mistake_trajectories= final_mistake_trajectories[random_indices]
-            elif len(final_mistake_trajectories_relevant)!=0:
-                random_indices = jax.random.choice(key, final_mistake_trajectories_relevant[0].shape[0], shape=(100,), replace=False)
-                final_mistake_trajectories= final_mistake_trajectories_relevant[0][random_indices]
+            #elif len(final_mistake_trajectories_relevant)!=0:
+                #random_indices = jax.random.choice(key, final_mistake_trajectories_relevant[0].shape[0], shape=(100,), replace=False)
+                #final_mistake_trajectories= final_mistake_trajectories_relevant[0][random_indices]
 
 
             all_action_taken_performance = perf_evaluator_output.action_taken_performance
@@ -455,25 +566,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             jax.block_until_ready(safe_evaluator_output)
             # Log the results of the evaluation.
 
-            ev = safe_evaluator_output.episode_metrics
-            fig = plt.figure(figsize=(8, 8), clear=True, num=0)
-            ax = fig.add_subplot(111)
-            rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
-                                linewidth=2, edgecolor='green', facecolor='white')
-            ax.add_patch(rectangle)
-            quiver_plot = ax.quiver(ev["x_grid"], ev["z_grid"], ev["arrowDirX"], ev["arrowDirY"], ev["threshold"], cmap="viridis",
-                                    angles="xy", scale_units="xy", scale=25)
-            # Set the plot boundaries
-            plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
-            plt.colorbar(quiver_plot, label="Safe actions from value in direction of arrow")
-            plt.xlabel("X")
-            plt.ylabel("Theta")
-            plt.title("Cartpole Border Decisions")
-            # Show the plot
-            img = wandb.Image(plt)
-            #wandb.log({"test":img})
-            safe_evaluator_output.episode_metrics["Image"] = img
-
+            plot_border_decisions(safe_evaluator_output.episode_metrics)
 
             elapsed_time = time.time() - start_time
             episode_return = log_evaluation_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, safe_evaluator_output,logger)
@@ -481,6 +574,15 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
 
             safe_learner_state = safe_learner_output.learner_state
             eval_step_safety+=1
+
+        config_p.arch.evaluation_greedy = True
+        key, _, _, _, perf_evaluator_greedy=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network, safe_q_network, safe_learner_state)
+        config_p.arch.evaluation_greedy = False
+        start_time = time.time()
+        # Evaluate greedily
+        perf_evaluator_output = perf_evaluator_greedy(perf_trained_params, perf_eval_keys)
+        jax.block_until_ready(perf_evaluator_output)
+        log_evaluation_metrics_performance_agent_greedy(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
 
         key, perf_learn, _, _, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network, safe_q_network, safe_learner_state)
         
@@ -492,15 +594,6 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         elapsed_time = time.time() - start_time    
         log_training_metrics_performance_training(config_p,config_s, elapsed_time, eval_step_perf,eval_step_safety, perf_learner_output, logger)
         
-
-        config_p.arch.evaluation_greedy = True
-        key, _, _, _, perf_evaluator_greedy=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network, safe_q_network, safe_learner_state)
-        config_p.arch.evaluation_greedy = False
-        start_time = time.time()
-        # Evaluate greedily
-        perf_evaluator_output = perf_evaluator(perf_trained_params, perf_eval_keys)
-        jax.block_until_ready(perf_evaluator_output)
-        log_evaluation_metrics_performance_agent_greedy(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
         eval_step_perf+=1
         # Update runner state to continue training.
         perf_learner_state = perf_learner_output.learner_state
@@ -534,8 +627,8 @@ def hydra_entry_point(cfg: DictConfig) -> float:
             bonus = [0.1,0.3,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.8][j]
             cfg_performance = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
             cfg_safety = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
-            cfg_performance.arch.seed = cfg_safety.arch.seed + (i+1) * 34
-            cfg_safety.arch.seed = cfg_safety.arch.seed + (i+1) * 34
+            cfg_performance.arch.seed = cfg_safety.arch.seed + (i+2) * 36
+            cfg_safety.arch.seed = cfg_safety.arch.seed + (i+2) * 36
             
             cfg_performance.system = list(cfg_safety.system.items())[1][1]
             cfg_safety.system = list(cfg_safety.system.items())[0][1]

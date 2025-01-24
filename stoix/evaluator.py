@@ -339,11 +339,11 @@ def get_ff_evaluator_fn(
         arrowDirY = 1-((a_h<0)*2) 
         arrowDirX = jnp.zeros_like(arrowDirY).flatten()
 
-        eval_metrics["x_grid"] = x_grid
-        eval_metrics["z_grid"] = z_grid
-        eval_metrics["arrowDirX"] = arrowDirX
-        eval_metrics["arrowDirY"] = arrowDirY
-        eval_metrics["threshold"] = threshold
+        eval_metrics["_x_grid"] = x_grid
+        eval_metrics["_z_grid"] = z_grid
+        eval_metrics["_arrowDirX"] = arrowDirX
+        eval_metrics["_arrowDirY"] = arrowDirY
+        eval_metrics["_threshold"] = threshold
         
         return EvaluationOutput(
             learner_state=eval_state,

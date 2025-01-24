@@ -88,7 +88,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
 
         action_proposal = jax.random.uniform(key, (1), minval=-1.0, maxval=1.0)
         action_proposal_freedom = jax.random.uniform(key, (100,1), minval=-1.0, maxval=1.0)
-        filter_factor = jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.4]))-0.4
+        filter_factor = (jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.3]))-0.4)/2
 
         def proj_fn(inp):
             a,a_h,b_h = inp
@@ -132,7 +132,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         
         if params.reward_with_bonus:
             #reward += 0.8 * jnp.tanh(10*freedom_factor)
-            reward -=filter_factor
+            reward -= filter_factor
 
         # Update state dict and evaluate termination conditions
         state = EnvState(
@@ -150,7 +150,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             jnp.array(reward),
             done,
             #{"discount": self.discount(state, params)}
-            {"q_safe_value":-10000,
+            {"q_safe_value":-150,
              "safe_action": action}
         )
 

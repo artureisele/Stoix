@@ -211,6 +211,8 @@ class WandBLogger(BaseLogger):
         # or it's a single metric doesn't contain a '/'.
         is_main_metric = "/" not in key or key.endswith("/mean")
         # If we're not detailed logging (logging everything) then make sure it's a main metric.
+        if key.startswith("_"):
+            return
         if not self.detailed_logging and not is_main_metric:
             return
 
