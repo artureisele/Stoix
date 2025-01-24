@@ -83,6 +83,7 @@ class MistakeEvalState(NamedTuple):
     safe_q_value: chex.Array
     action_taken_performance: chex.Array
     action_taken_safety: chex.Array
+    filter_factor: chex.Array
 
 
 
@@ -203,6 +204,7 @@ class EvaluationOutputTrajectory(NamedTuple, Generic[StoixState]):
     safe_q_values: chex.Array
     action_taken_performance: chex.Array
     action_taken_safety: chex.Array
+    filter_factor: chex.Array
 
 RNNObservation: TypeAlias = Tuple[Observation, Done]
 LearnerFn = Callable[[StoixState], AnakinExperimentOutput[StoixState]]

@@ -364,6 +364,24 @@ def plot_eval_trajectories_candidates_mistake_trajectories2(perf_evaluator_outpu
     #wandb.log({"test":img})
     perf_evaluator_output.episode_metrics["Eval_Trajectories_End_50"] = img
 
+def plot_starting_states(starting_states, perf_evaluator_output):
+    fig = plt.figure(figsize=(8, 8), clear=True, num=0)
+    ax = fig.add_subplot(111)
+    rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
+                        linewidth=2, edgecolor='green', facecolor='white')
+    ax.add_patch(rectangle)
+
+    # Set the plot boundaries
+    eval_traj_plot = plt.scatter(starting_states[:,0], starting_states[:,2], s=10)
+    plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
+    plt.xlabel("X")
+    plt.ylabel("Theta")
+    plt.title("Safety_Training_Starting_States")
+    # Show the plot
+    img = wandb.Image(plt)
+    #wandb.log({"test":img})
+    perf_evaluator_output.episode_metrics["Safety_Training_Starting_States"] = img
+
 def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
     """Runs experiment."""
     print("Initialize the config dicts!")
@@ -454,10 +472,6 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             plot_eval_trajectories(perf_evaluator_output)
             plot_eval_trajectories_candidates_mistake_trajectories2(perf_evaluator_output)
             plot_eval_trajectories_candidates_mistake_trajectories(perf_evaluator_output)
-            # Log the results of the evaluation.
-            elapsed_time = time.time() - start_time
-            perf_eval_length = log_evaluation_metrics_performance_agent_for_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
-            print(f"Performance eval length: {perf_eval_length}")
 
             """
             if perf_eval_length >=config_s.env.solved_return_threshold:
@@ -507,32 +521,6 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
                         random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(5,), replace=False)
                         final_mistake_trajectories= final_mistake_trajectories[random_indices]
             """
-            final_mistake_trajectories = perf_evaluator_output.learner_state[0]
-            safe_q_values = perf_evaluator_output.safe_q_values[0]
-
-            #safe_q_values_relevant = safe_q_values[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
-            relevant_ep_lengths = perf_evaluator_output.episode_metrics["episode_length"][0,:,0][ perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
-            final_mistake_trajectories = final_mistake_trajectories[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
-            final_mistake_trajectories_ends = final_mistake_trajectories[jnp.arange(final_mistake_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-50),a_min=0).astype(int)]
-            final_mistake_trajectories_starts = final_mistake_trajectories[jnp.arange(final_mistake_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-10000),a_min=0).astype(int)]
-            #indices = jnp.logical_and(safe_q_values_relevant<=90,safe_q_values_relevant>=35)
-            #final_mistake_trajectories = final_mistake_trajectories_relevant[indices].reshape(-1,4)
-            final_mistake_trajectories_starts = final_mistake_trajectories_starts.reshape(-1,4)
-            final_mistake_trajectories_ends = final_mistake_trajectories_ends.reshape(-1,4)
-            final_mistake_trajectories = jnp.concatenate(jnp.array([final_mistake_trajectories_starts, final_mistake_trajectories_ends]), axis=0)
-            #safe_q_values_relevant = safe_q_values_relevant[indices].reshape(-1)
-            print(f"Length potential starting states{len(final_mistake_trajectories)}")
-
-            if len(final_mistake_trajectories)!=0:
-                def softmax(x):
-                    exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
-                    return exp_x / exp_x.sum()
-                if len(final_mistake_trajectories)>100:
-                    random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(100,), replace=False)# p = softmax(100-safe_q_values_relevant))
-                    final_mistake_trajectories= final_mistake_trajectories[random_indices]
-            #elif len(final_mistake_trajectories_relevant)!=0:
-                #random_indices = jax.random.choice(key, final_mistake_trajectories_relevant[0].shape[0], shape=(100,), replace=False)
-                #final_mistake_trajectories= final_mistake_trajectories_relevant[0][random_indices]
 
 
             all_action_taken_performance = perf_evaluator_output.action_taken_performance
@@ -546,11 +534,59 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
                 maximal_actions_taken_safety.append(all_action_taken_safety[0][argmax_eval_index].tolist())
                 perf_eval_best_reward = result_best_local
 
-            if perf_eval_length >=config_s.env.solved_return_threshold:
+            if perf_evaluator_output.episode_metrics["episode_length"].mean() >=config_s.env.solved_return_threshold:
+                safety_assured_counter+=1
+                all_filter_factors = perf_evaluator_output.filter_factor[0]
+                max_filter_indices = jnp.argmax(all_filter_factors, axis=1)
+                all_trajectories = all_trajectories[0]
+                exploration_starting_states = all_trajectories[jnp.arange(all_trajectories.shape[0]), max_filter_indices]
+                exploration_starting_states = exploration_starting_states.reshape(-1,4)
+                plot_starting_states(exploration_starting_states, perf_evaluator_output)
+                starting_states = exploration_starting_states
+            else:
+                safety_assured_counter = 0
+                final_mistake_trajectories = perf_evaluator_output.learner_state[0]
+                safe_q_values = perf_evaluator_output.safe_q_values[0]
+
+                #safe_q_values_relevant = safe_q_values[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+                relevant_ep_lengths = perf_evaluator_output.episode_metrics["episode_length"][0,:,0][ perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+                final_mistake_trajectories = final_mistake_trajectories[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+                final_mistake_trajectories_ends = final_mistake_trajectories[jnp.arange(final_mistake_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-40),a_min=0).astype(int)]
+                final_mistake_trajectories_starts = final_mistake_trajectories[jnp.arange(final_mistake_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-10000),a_min=0).astype(int)]
+                if len(final_mistake_trajectories_starts) >10:
+                    random_indices_starts = jax.random.choice(key, final_mistake_trajectories_starts.shape[0], shape=(10,), replace=False)
+                    final_mistake_trajectories_starts[random_indices_starts]
+                #indices = jnp.logical_and(safe_q_values_relevant<=90,safe_q_values_relevant>=35)
+                #final_mistake_trajectories = final_mistake_trajectories_relevant[indices].reshape(-1,4)
+                final_mistake_trajectories_starts = final_mistake_trajectories_starts.reshape(-1,4)
+                final_mistake_trajectories_ends = final_mistake_trajectories_ends.reshape(-1,4)
+                final_mistake_trajectories = jnp.concatenate(jnp.array([final_mistake_trajectories_starts, final_mistake_trajectories_ends]), axis=0)
+                #safe_q_values_relevant = safe_q_values_relevant[indices].reshape(-1)
+                print(f"Length potential starting mistake states{len(final_mistake_trajectories)}")
+
+                if len(final_mistake_trajectories)!=0:
+                    def softmax(x):
+                        exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
+                        return exp_x / exp_x.sum()
+                    if len(final_mistake_trajectories)>100:
+                        random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(100,), replace=False)# p = softmax(100-safe_q_values_relevant))
+                        final_mistake_trajectories= final_mistake_trajectories[random_indices]
+                #elif len(final_mistake_trajectories_relevant)!=0:
+                    #random_indices = jax.random.choice(key, final_mistake_trajectories_relevant[0].shape[0], shape=(100,), replace=False)
+                    #final_mistake_trajectories= final_mistake_trajectories_relevant[0][random_indices]
+                plot_starting_states(final_mistake_trajectories, perf_evaluator_output)
+                starting_states = final_mistake_trajectories
+
+            # Log the results of the evaluation.
+            elapsed_time = time.time() - start_time
+            perf_eval_length = log_evaluation_metrics_performance_agent_for_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
+            print(f"Performance eval length: {perf_eval_length}")
+            if safety_assured_counter >= 2:
                 break
 
-            custom_extras_safety = {"mistake_trajectories": final_mistake_trajectories}
-            print(f"Len Mistake:{len(final_mistake_trajectories)}")
+
+            custom_extras_safety = {"mistake_trajectories": starting_states}
+            print(f"Len Starting_states:{len(starting_states)}")
 
             key, safe_learn, _, _,_, safe_evaluator = generate_safety_env_and_learn(config_s, key, custom_extras_safety)
 

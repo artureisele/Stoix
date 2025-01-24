@@ -115,7 +115,8 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             def identity_fn(inp):
                 a,a_h,b_h = inp
                 return a
-
+            action_proposal_freedom = jax.random.uniform(key, (100,1), minval=-1.0, maxval=1.0)
+            filter_factor = (jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.4]))-0.4)/2
             action = jax.lax.cond(jnp.squeeze(jnp.dot(a_h, action_proposal) < b_h), proj_fn, identity_fn, operand=(action_proposal,a_h,b_h))
         """
         a_h = action[0]/jnp.abs(action[0])
@@ -180,7 +181,8 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             done,
             {#"discount": self.discount(state, params),
              "q_safe_value": q_value_safety,
-             "safe_action": action_safety_filter},
+             "safe_action": action_safety_filter,
+             "filter_factor": filter_factor,}
         )
 
     def reset_env(

@@ -68,7 +68,7 @@ class GymnaxWrapper(Wrapper):
         key, reset_key = jax.random.split(key)
         obs, gymnax_state = self._env.reset(reset_key, self._env_params)
         obs = Observation(obs, self._legal_action_mask, jnp.array(0, dtype=int))
-        timestep = restart(obs, extras={"q_safe_value":-150, "safe_action":jnp.zeros((2), )})
+        timestep = restart(obs, extras={"q_safe_value":-150, "safe_action":jnp.zeros((2), ),"filter_factor":-1.0})
         state = GymnaxEnvState(
             key=key, gymnax_env_state=gymnax_state, step_count=jnp.array(0, dtype=int)
         )

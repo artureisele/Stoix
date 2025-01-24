@@ -101,7 +101,7 @@ def get_ff_evaluator_fn_track_failed_trajectories(
         def _env_step(mistake_eval_state: MistakeEvalState) -> MistakeEvalState:
             """Step the environment."""
             # PRNG keys.
-            key, env_state, last_timestep, step_count, episode_return, trajectory,safe_q_value, action_taken_performance, action_taken_safety = mistake_eval_state
+            key, env_state, last_timestep, step_count, episode_return, trajectory,safe_q_value, action_taken_performance, action_taken_safety, filter_factor= mistake_eval_state
 
             # Select action.
             key, policy_key = jax.random.split(key)
@@ -130,6 +130,7 @@ def get_ff_evaluator_fn_track_failed_trajectories(
                 safe_q_value=safe_q_value.at[step_count-1].set(last_timestep.extras["q_safe_value"]),
                 action_taken_performance=action_taken_performance.at[step_count-1].set(action[0]),
                 action_taken_safety=action_taken_safety.at[step_count-1].set(last_timestep.extras["safe_action"]),
+                filter_factor=filter_factor.at[step_count-1].set(last_timestep.extras["filter_factor"])
             )
             return mistake_eval_state
 
@@ -153,10 +154,11 @@ def get_ff_evaluator_fn_track_failed_trajectories(
             ).astype(int)
         complete_trajectory = final_state.trajectory
         safe_q_values = final_state.safe_q_value
+        filter_factor = final_state.filter_factor
         action_taken_performance = final_state.action_taken_performance
         action_taken_safety = final_state.action_taken_safety
         #Trajectory is != 0 only if it failed, complete_trajectory returns the trajectory independent of failure
-        return eval_metrics, trajectory, complete_trajectory, safe_q_values, action_taken_performance, action_taken_safety
+        return eval_metrics, trajectory, complete_trajectory, safe_q_values, action_taken_performance, action_taken_safety, filter_factor
 
     def evaluator_fn(trained_params: FrozenDict, key: chex.PRNGKey) -> EvaluationOutputTrajectory[EvalState]:
         """Evaluator function."""
@@ -185,11 +187,12 @@ def get_ff_evaluator_fn_track_failed_trajectories(
             safe_q_value =jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode)),
             action_taken_performance = jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode)),
             action_taken_safety=jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode, 2)),
+            filter_factor=jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode))
         )
-        eval_metrics, final_mistake_trajectories, complete_trajectories, safe_q_values,action_taken_performance,action_taken_safety = jax.vmap(
+        eval_metrics, final_mistake_trajectories, complete_trajectories, safe_q_values,action_taken_performance,action_taken_safety, filter_factor = jax.vmap(
             eval_one_episode,
             in_axes=(None, 0),
-            out_axes=(0,0,0,0,0,0),
+            out_axes=(0,0,0,0,0,0,0),
             axis_name="eval_batch",
         )(trained_params, mistake_eval_state)
 
@@ -199,7 +202,8 @@ def get_ff_evaluator_fn_track_failed_trajectories(
             trajectories=complete_trajectories,
             safe_q_values = safe_q_values,
             action_taken_performance = action_taken_performance,
-            action_taken_safety = action_taken_safety
+            action_taken_safety = action_taken_safety,
+            filter_factor = filter_factor,
         )
 
     return evaluator_fn

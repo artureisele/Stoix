@@ -88,7 +88,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
 
         action_proposal = jax.random.uniform(key, (1), minval=-1.0, maxval=1.0)
         action_proposal_freedom = jax.random.uniform(key, (100,1), minval=-1.0, maxval=1.0)
-        filter_factor = (jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.3]))-0.4)/2
+        filter_factor = (jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.4]))-0.4)
 
         def proj_fn(inp):
             a,a_h,b_h = inp
@@ -127,13 +127,6 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         theta = state.theta + params.tau * state.theta_dot
         theta_dot = state.theta_dot + params.tau * thetaacc
 
-        # Important: Reward is based on termination is previous step transition
-        reward = 1.0 - prev_terminal_and_not_truncated*101
-        
-        if params.reward_with_bonus:
-            #reward += 0.8 * jnp.tanh(10*freedom_factor)
-            reward -= filter_factor
-
         # Update state dict and evaluate termination conditions
         state = EnvState(
             x=x,
@@ -143,7 +136,13 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             time=state.time + 1,
         )
         done = self.is_terminal(state, params)
-
+        doneAndNotTruncated = self.is_terminal_and_not_truncated(state, params)
+        # Important: Reward is based on termination is previous step transition
+        reward = 1.0 - doneAndNotTruncated*101
+        
+        if params.reward_with_bonus:
+            #reward += 0.8 * jnp.tanh(10*freedom_factor)
+            reward -= filter_factor
         return (
             lax.stop_gradient(self.get_obs(state)),
             lax.stop_gradient(state),
@@ -151,7 +150,8 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             done,
             #{"discount": self.discount(state, params)}
             {"q_safe_value":-150,
-             "safe_action": action}
+             "safe_action": action,
+             "filter_factor": -1.0}
         )
 
     def reset_env(
@@ -199,6 +199,19 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         # Check number of steps in episode termination condition
         done_steps = state.time >= params.max_steps_in_episode
         done = jnp.logical_or(jnp.logical_or(done1, done2), done_steps)
+        return done
+    def is_terminal_and_not_truncated(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
+        """Check whether state is terminal."""
+        # Check termination criteria
+        done1 = jnp.logical_or(
+            state.x < -params.x_threshold,
+            state.x > params.x_threshold,
+        )
+        done2 = jnp.logical_or(
+            state.theta < -params.theta_threshold_radians,
+            state.theta > params.theta_threshold_radians,
+        )
+        done = jnp.logical_or(done1, done2)
         return done
 
     @property
