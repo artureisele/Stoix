@@ -139,7 +139,7 @@ class Renderer():
             text_surface = font.render(f"State: [{round(state[0],2),round(state[1],2),round(state[2],2),round(state[3],2)}]", True, "black")
             text_rect = text_surface.get_rect(center=(int(self.screen_width / 2.0), int(self.screen_height/4)))
             self.surf.blit(text_surface, text_rect)
-            text_surface = font.render(f"Action_perf:{round(action_perf,2)}, Action_safe:{round(action_perf[0],2)},{round(action_perf[1],2)}", True, "black")
+            text_surface = font.render(f"Action_perf:{round(action_perf,2)}, Action_safe:{round(action_safe[0],2)},{round(action_safe[1],2)}", True, "black")
             text_rect = text_surface.get_rect(center=(int(self.screen_width / 2.0), int(self.screen_height/4)-30))
             self.surf.blit(text_surface, text_rect)
         self.screen.blit(self.surf, (0, 0))

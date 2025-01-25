@@ -656,7 +656,7 @@ def hydra_entry_point(cfg: DictConfig) -> float:
     # Allow dynamic attributes.
     OmegaConf.set_struct(cfg, False)
     for j in range(10):
-        for i in range(6):
+        for i in range(1,6):
             if j <= 5 or j>6:
                 continue
             
