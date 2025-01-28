@@ -1,7 +1,8 @@
 from stoix.custom_envs.cartpole_hyperplane import CartPole as CartPoleSafe
 from stoix.custom_envs.cartpole_performance import CartPole as CartPolePerf
+from stoix.custom_envs.wheelbot import Wheelbot
 
-registered_envs = ["CartPoleHyperplane", "CartPolePerformance"]
+registered_envs = ["CartPoleHyperplane", "CartPolePerformance", "Wheelbot-v0"]
 def make(env_id: str, **env_kwargs):
     """A JAX-version of OpenAI's infamous env.make(env_name).
 
@@ -22,4 +23,6 @@ def make(env_id: str, **env_kwargs):
         env = CartPoleSafe(**env_kwargs)
     if env_id == "CartPolePerformance":
         env = CartPolePerf(**env_kwargs)
+    if env_id == "Wheelbot-v0":
+        env = Wheelbot(**env_kwargs)
     return env, env.default_params

@@ -39,7 +39,7 @@ from stoix.wrappers.transforms import (
     MultiDiscreteToDiscrete,
 )
 from stoix.wrappers.xminigrid import XMiniGridWrapper
-
+from brax.envs.wrappers import training
 
 def make_jumanji_env(
     env_name: str,
@@ -95,8 +95,15 @@ def make_custom_env(env_name: str, config: DictConfig, custom_extras: dict={}) -
     env, env_params = custom_register.make(env_name, **config.env.kwargs, **custom_extras)
     eval_env, eval_env_params = custom_register.make(env_name, **config.env.kwargs,**custom_extras)
     eval_env_params = eval_env.eval_params
-    env = GymnaxWrapper(env, env_params)
-    eval_env = GymnaxWrapper(eval_env, eval_env_params)
+    if env_name != "Wheelbot-v0":
+        env = GymnaxWrapper(env, env_params)
+        eval_env = GymnaxWrapper(eval_env, eval_env_params)
+    else:
+        env = training.EpisodeWrapper(env, 10000, 1)
+        eval_env = training.EpisodeWrapper(env, 10000, 1)
+
+        env = BraxJumanjiWrapper(env)
+        eval_env = BraxJumanjiWrapper(eval_env)
 
     env = AutoResetWrapper(env, next_obs_in_extras=True)
     env = RecordEpisodeMetrics(env)
