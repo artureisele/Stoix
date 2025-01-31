@@ -397,6 +397,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
     eval_step_safety = 0
     eval_step_perf=0
     perf_eval_best_reward = 0
+    perf_eval_mean_best_reward = 0
     maximal_trajectories=[]
     maximal_actions_taken_performance=[]
     maximal_actions_taken_safety=[]
@@ -539,7 +540,11 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
                 all_filter_factors = perf_evaluator_output.filter_factor[0]
                 max_filter_indices = jnp.argmax(all_filter_factors, axis=1)
                 all_trajectories = all_trajectories[0]
-                exploration_starting_states = all_trajectories[jnp.arange(all_trajectories.shape[0]), max_filter_indices]
+                #exploration_starting_states = all_trajectories[jnp.arange(all_trajectories.shape[0]), max_filter_indices]
+                random_rows_indices = jax.random.choice(key, all_trajectories.shape[0], shape=(400,), replace=True)
+                column_index = jnp.arange(all_trajectories.shape[1]-100)
+                #jax.debug.breakpoint()
+                exploration_starting_states = all_trajectories[random_rows_indices.astype(int), column_index.astype(int)]
                 exploration_starting_states = exploration_starting_states.reshape(-1,4)
                 plot_starting_states(exploration_starting_states, perf_evaluator_output)
                 starting_states = exploration_starting_states
@@ -551,26 +556,33 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
                 #safe_q_values_relevant = safe_q_values[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
                 relevant_ep_lengths = perf_evaluator_output.episode_metrics["episode_length"][0,:,0][ perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
                 final_mistake_trajectories = final_mistake_trajectories[perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
+                minimal_end_index = jnp.clip(jnp.min((relevant_ep_lengths-40)),a_min=1)
+                random_row_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(minimal_end_index,), replace=True)
+                final_mistake_trajectories_way = final_mistake_trajectories[random_row_indices, jnp.arange(minimal_end_index)]
                 final_mistake_trajectories_ends = final_mistake_trajectories[jnp.arange(final_mistake_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-40),a_min=0).astype(int)]
-                final_mistake_trajectories_starts = final_mistake_trajectories[jnp.arange(final_mistake_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-10000),a_min=0).astype(int)]
-                if len(final_mistake_trajectories_starts) >10:
-                    random_indices_starts = jax.random.choice(key, final_mistake_trajectories_starts.shape[0], shape=(10,), replace=False)
-                    final_mistake_trajectories_starts[random_indices_starts]
+
+                #final_mistake_trajectories_starts = final_mistake_trajectories[jnp.arange(final_mistake_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-10000),a_min=0).astype(int)]
+                #if len(final_mistake_trajectories_starts) >10:
+                    #random_indices_starts = jax.random.choice(key, final_mistake_trajectories_starts.shape[0], shape=(10,), replace=False)
+                    #final_mistake_trajectories_starts[random_indices_starts]
+
                 #indices = jnp.logical_and(safe_q_values_relevant<=90,safe_q_values_relevant>=35)
                 #final_mistake_trajectories = final_mistake_trajectories_relevant[indices].reshape(-1,4)
-                final_mistake_trajectories_starts = final_mistake_trajectories_starts.reshape(-1,4)
+
+                final_mistake_trajectories_way = final_mistake_trajectories_way.reshape(-1,4)
                 final_mistake_trajectories_ends = final_mistake_trajectories_ends.reshape(-1,4)
-                final_mistake_trajectories = jnp.concatenate(jnp.array([final_mistake_trajectories_starts, final_mistake_trajectories_ends]), axis=0)
+
+                final_mistake_trajectories = jnp.concatenate([final_mistake_trajectories_way, final_mistake_trajectories_ends], axis=0)
                 #safe_q_values_relevant = safe_q_values_relevant[indices].reshape(-1)
                 print(f"Length potential starting mistake states{len(final_mistake_trajectories)}")
 
-                if len(final_mistake_trajectories)!=0:
-                    def softmax(x):
-                        exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
-                        return exp_x / exp_x.sum()
-                    if len(final_mistake_trajectories)>100:
-                        random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(100,), replace=False)# p = softmax(100-safe_q_values_relevant))
-                        final_mistake_trajectories= final_mistake_trajectories[random_indices]
+                #if len(final_mistake_trajectories)!=0:
+                    #def softmax(x):
+                        #exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
+                        #return exp_x / exp_x.sum()
+                    #if len(final_mistake_trajectories)>100:
+                        #random_indices = jax.random.choice(key, final_mistake_trajectories.shape[0], shape=(100,), replace=False)# p = softmax(100-safe_q_values_relevant))
+                        #final_mistake_trajectories= final_mistake_trajectories[random_indices]
                 #elif len(final_mistake_trajectories_relevant)!=0:
                     #random_indices = jax.random.choice(key, final_mistake_trajectories_relevant[0].shape[0], shape=(100,), replace=False)
                     #final_mistake_trajectories= final_mistake_trajectories_relevant[0][random_indices]
@@ -585,7 +597,9 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
                 break
 
 
-            custom_extras_safety = {"mistake_trajectories": starting_states}
+            custom_extras_safety = {"mistake_trajectories": starting_states,
+                                    "perf_policy_func":get_distribution_act_fn(config_p, perf_actor_network.apply),
+                                    "perf_policy_params": unreplicate_n_dims(perf_learner_state.params.actor_params)}
             print(f"Len Starting_states:{len(starting_states)}")
 
             key, safe_learn, _, _,_, safe_evaluator = generate_safety_env_and_learn(config_s, key, custom_extras_safety)
@@ -619,10 +633,41 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         perf_evaluator_output = perf_evaluator_greedy(perf_trained_params, perf_eval_keys)
         jax.block_until_ready(perf_evaluator_output)
         log_evaluation_metrics_performance_agent_greedy(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
+        """
 
+        result_mean_local = perf_evaluator_output.episode_metrics["episode_return"].mean()
+        
+        if perf_eval_mean_best_reward<result_mean_local:
+            perf_eval_mean_best_reward = result_mean_local
+        elif perf_eval_mean_best_reward -result_mean_local >= 80000:
+            perf_eval_mean_best_reward = 0
+            print("Start Initializing the Performance Training")
+            config_p.system.rollout_length = 0
+            config_p.system.epochs = _config_p.system.initial_learning_epochs
+            key, perf_learn, perf_actor_network, perf_learner_state, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network,safe_q_network, safe_learner_state)
+            
+            print("Start  NEW first performance training for biasing the first learned performance polciy")
+            start_time = time.time()
+            perf_learner_output = perf_learn(perf_learner_state)
+            jax.block_until_ready(perf_learner_output)
+
+            #Return to original values, high rollout length and epochs with just one update step to first gather safe experience and then learn from all of it
+            config_p.system.rollout_length = _config_p.system.rollout_length
+            config_p.system.epochs = _config_p.system.epochs
+
+            elapsed_time = time.time() - start_time    
+            log_training_metrics_performance_training(config_p,config_s, elapsed_time, eval_step_perf,eval_step_safety, perf_learner_output, logger)
+            
+            eval_step_perf+=1
+            # Update runner state to continue training.
+            perf_learner_state = perf_learner_output.learner_state
+
+            continue
+        """
+    
+        print(f"Start {i} performance training in Double Learning procedure")
         key, perf_learn, _, _, perf_evaluator=generate_performance_learner_and_evaluator(config_s,key,config_p, safe_actor_network, safe_q_network, safe_learner_state)
         
-        print(f"Start {i} performance training in Double Learning procedure")
         start_time = time.time()
         perf_learner_output = perf_learn(perf_learner_state)
         jax.block_until_ready(perf_learner_output)

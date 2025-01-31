@@ -35,6 +35,7 @@ class EnvParams(environment.EnvParams):
     max_steps_in_episode: int = 500  # v0 had only 200 steps!
     x_threshold: float = 2.4
     theta_threshold_radians: float = 24 * 2 * jnp.pi / 360
+    penalize_safety_violation: float = 0.0
 
 @struct.dataclass
 class EvalEnvParams(environment.EnvParams):
@@ -49,6 +50,7 @@ class EvalEnvParams(environment.EnvParams):
     max_steps_in_episode: int = 500  # v0 had only 200 steps!
     x_threshold: float = 2.4
     theta_threshold_radians: float = 24 * 2 * jnp.pi / 360
+    penalize_safety_violation: float = 0.0
 
 
 class CartPole(environment.Environment[EnvState, EnvParams]):
@@ -87,8 +89,8 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         prev_terminal = self.is_terminal(state, params)
         truncation = (state.time >= params.max_steps_in_episode)
         prev_terminal_and_not_truncated = jnp.logical_and(prev_terminal, jnp.logical_not(truncation) )
+        action_proposal = action
         if self.safety_filter_function!=None and self.safety_filter_params!=None:
-            action_proposal = action
 
             observation = Observation(
                 agent_view=self.get_obs(state, params),
@@ -161,7 +163,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         # Important: Reward is based on termination is previous step transition
         penalty = jnp.abs(x-self.focus)/(2*params.x_threshold)
         
-        reward = 1 - penalty - prev_terminal_and_not_truncated*101
+        reward = 1 - penalty - prev_terminal_and_not_truncated*101 -params.penalize_safety_violation*jnp.sum(jnp.abs(action-action_proposal))
         
 
         # Update state dict and evaluate termination conditions
@@ -182,7 +184,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             {#"discount": self.discount(state, params),
              "q_safe_value": q_value_safety,
              "safe_action": action_safety_filter,
-             "filter_factor": filter_factor,}
+             "filter_factor": jnp.sum(jnp.abs(action-action_proposal)),}
         )
 
     def reset_env(

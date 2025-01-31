@@ -11,7 +11,9 @@ import jax.numpy as jnp
 from gymnax.environments import environment
 from gymnax.environments import spaces
 import numpy as np
-
+from stoix.base_types import (
+    Observation
+)
 @struct.dataclass
 class EnvState(environment.EnvState):
     x: jnp.ndarray
@@ -58,11 +60,13 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     Source: github.com/openai/gym/blob/master/gym/envs/classic_control/cartpole.py
     """
 
-    def __init__(self, eval = True,mistake_trajectories=None, bonus = 0.5):
+    def __init__(self, eval = True,mistake_trajectories=None, bonus = 0.5, perf_policy_func = None, perf_policy_params = None):
         super().__init__()
         self.obs_shape = (4,)
         self.mistake_trajectories = mistake_trajectories
         self.bonus = 0.5
+        self.perf_policy_func = perf_policy_func
+        self.perf_policy_params = perf_policy_params 
 
     @property
     def default_params(self) -> EnvParams:
@@ -80,13 +84,25 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
         """Performs step transitions in the environment."""
-        prev_terminal = self.is_terminal(state, params)
-        truncation = (state.time >= params.max_steps_in_episode)
-        prev_terminal_and_not_truncated = jnp.logical_and(prev_terminal, jnp.logical_not(truncation) )
+        #prev_terminal = self.is_terminal(state, params)
+        #truncation = (state.time >= params.max_steps_in_episode)
+        #prev_terminal_and_not_truncated = jnp.logical_and(prev_terminal, jnp.logical_not(truncation) )
         a_h = action[0]/jnp.abs(action[0])
         b_h = action[1]
 
         action_proposal = jax.random.uniform(key, (1), minval=-1.0, maxval=1.0)
+        #action_proposal_freedom = jax.random.uniform(key, (100,1), minval=-1.0, maxval=1.0)
+       # if self.perf_policy_func!= None:
+       #     observation = Observation(
+        #        agent_view=self.get_obs(state, params),
+        #        action_mask=jnp.array([True]),
+        #        step_count=jnp.array(0)
+        #    )
+        #    action_proposal_freedom = jax.random.uniform(key, (100,1), minval=-0.6, maxval=0.6)
+        #    action_proposal_perf = self.perf_policy_func(self.perf_policy_params, observation, key)
+        #    action_proposal_perf_noise = action_proposal_perf + action_proposal_freedom
+        #    filter_factor = jnp.sum(jnp.dot(a_h, action_proposal_perf_noise) < b_h) / 200
+        #else:
         action_proposal_freedom = jax.random.uniform(key, (100,1), minval=-1.0, maxval=1.0)
         filter_factor = (jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.4]))-0.4)
 
