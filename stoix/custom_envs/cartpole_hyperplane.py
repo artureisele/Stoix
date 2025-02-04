@@ -60,11 +60,11 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     Source: github.com/openai/gym/blob/master/gym/envs/classic_control/cartpole.py
     """
 
-    def __init__(self, eval = True,mistake_trajectories=None, bonus = 0.5, perf_policy_func = None, perf_policy_params = None):
+    def __init__(self,mistake_trajectories=None, bonus = 0.5, perf_policy_func = None, perf_policy_params = None):
         super().__init__()
         self.obs_shape = (4,)
         self.mistake_trajectories = mistake_trajectories
-        self.bonus = 0.5
+        self.bonus = bonus
         self.perf_policy_func = perf_policy_func
         self.perf_policy_params = perf_policy_params 
 

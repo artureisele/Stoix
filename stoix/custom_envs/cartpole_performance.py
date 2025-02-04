@@ -60,7 +60,7 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
     Source: github.com/openai/gym/blob/master/gym/envs/classic_control/cartpole.py
     """
 
-    def __init__(self, eval = True, focus = 1.5, safety_filter_function = None, safety_filter_params = None,safe_filter_q = None,safe_filter_q_params = None):
+    def __init__(self,focus = 1.5, safety_filter_function = None, safety_filter_params = None,safe_filter_q = None,safe_filter_q_params = None):
         super().__init__()
         self.obs_shape = (4,)
         self.focus = focus

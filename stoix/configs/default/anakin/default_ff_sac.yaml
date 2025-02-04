@@ -3,7 +3,7 @@ defaults:
   - arch: anakin
   - system: sac/ff_sac
   - network: mlp_sac
-  - env: custom_performance/cartpole
+  - env: brax/halfcheetah
   - _self_
 
 hydra:

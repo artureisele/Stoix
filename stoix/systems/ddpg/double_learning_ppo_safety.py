@@ -61,8 +61,9 @@ from stoix.systems.ppo.anakin.ff_ppo_continuous_kl_early_stopping import get_lea
 from stoix.systems.sac.ff_sac_delayed import learner_setup as learner_setup_p
 from stoix.systems.sac.ff_sac_delayed import get_learner_fn as get_learner_fn_p
 from stoix.systems.sac.ff_sac_delayed import get_warmup_fn as get_warmup_fn_p
+#from jax import config
 
-
+#print("JIT, vmap, and pmap are disabled for debugging.")
 
 def initialize_config_dicts(_config_s, _config_p):
     # Calculate total timesteps.
@@ -266,25 +267,25 @@ def plot_border_decisions(ev):
 def plot_eval_trajectories(perf_evaluator_output):
     fig = plt.figure(figsize=(8, 8), clear=True, num=0)
     ax = fig.add_subplot(111)
-    rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
-                        linewidth=2, edgecolor='green', facecolor='white')
-    ax.add_patch(rectangle)
-    all_action_taken_performance = perf_evaluator_output.action_taken_performance[0]
-    all_action_taken_safety= perf_evaluator_output.action_taken_safety[0]
+    #rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
+    #                    linewidth=2, edgecolor='green', facecolor='white')
+    #ax.add_patch(rectangle)
+    #all_action_taken_performance = perf_evaluator_output.action_taken_performance[0]
+    #all_action_taken_safety= perf_evaluator_output.action_taken_safety[0]
     all_trajectories = perf_evaluator_output.trajectories[0]
     safe_v_values = perf_evaluator_output.safe_q_values[0]
     all_trajectories_reshaped = all_trajectories.reshape(-1,4)
     safe_v_values_reshaped = safe_v_values.reshape(-1,1)
     indices = jnp.any(all_trajectories_reshaped!=0,axis=1)
     all_trajectories_x = all_trajectories_reshaped[indices][:,0].tolist()
-    all_trajectories_theta = all_trajectories_reshaped[indices][:,2].tolist()
+    all_trajectories_theta = all_trajectories_reshaped[indices][:,1].tolist()
     safe_v_values_without_zeros = safe_v_values_reshaped[indices]
     # Set the plot boundaries
     eval_traj_plot = plt.scatter(all_trajectories_x, all_trajectories_theta, c=safe_v_values_without_zeros, cmap="viridis", s=5)
-    plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
+    #plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
     plt.colorbar(eval_traj_plot, label="V Value")
-    plt.xlabel("X")
-    plt.ylabel("Theta")
+    plt.xlabel("Z")
+    plt.ylabel("Theta Tip")
     plt.title("Eval Trajectories all")
     # Show the plot
     img = wandb.Image(plt)
@@ -367,14 +368,14 @@ def plot_eval_trajectories_candidates_mistake_trajectories2(perf_evaluator_outpu
 def plot_starting_states(starting_states, perf_evaluator_output):
     fig = plt.figure(figsize=(8, 8), clear=True, num=0)
     ax = fig.add_subplot(111)
-    rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
-                        linewidth=2, edgecolor='green', facecolor='white')
-    ax.add_patch(rectangle)
+    #rectangle = patches.Rectangle((-2.4, -24 * 2 * math.pi / 360), 2 * 2.4, 2 * 24 * 2 * math.pi / 360,
+    #                    linewidth=2, edgecolor='green', facecolor='white')
+    #ax.add_patch(rectangle)
 
     # Set the plot boundaries
-    eval_traj_plot = plt.scatter(starting_states[:,0], starting_states[:,2], s=10)
+    eval_traj_plot = plt.scatter(starting_states[:,0], starting_states[:,1], s=10)
     plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
-    plt.xlabel("X")
+    plt.xlabel("Z")
     plt.ylabel("Theta")
     plt.title("Safety_Training_Starting_States")
     # Show the plot
@@ -418,7 +419,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         safe_evaluator_output = safe_evaluator(safe_trained_params, eval_keys)
         jax.block_until_ready(safe_evaluator_output)
 
-        plot_border_decisions(safe_evaluator_output.episode_metrics)
+        #plot_border_decisions(safe_evaluator_output.episode_metrics)
 
 
 
@@ -426,10 +427,10 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         # Log the results of the evaluation.
         elapsed_time = time.time() - start_time
         episode_return = log_evaluation_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, safe_evaluator_output,logger)
-        print(f"Episode Return of evaluation: {episode_return}")
+        print(f"Episode Length mean of evaluation: {safe_evaluator_output.episode_metrics['episode_length'].mean()}")
 
         # Terminate if environment is safety filtered
-        if episode_return>= config_s.env.solved_return_threshold:
+        if safe_evaluator_output.episode_metrics["episode_length"].mean() >= config_s.env.solved_return_threshold:
             safe = True
 
         eval_step_safety +=1
@@ -471,8 +472,8 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             perf_evaluator_output = perf_evaluator(perf_trained_params, perf_eval_keys)
             jax.block_until_ready(perf_evaluator_output)
             plot_eval_trajectories(perf_evaluator_output)
-            plot_eval_trajectories_candidates_mistake_trajectories2(perf_evaluator_output)
-            plot_eval_trajectories_candidates_mistake_trajectories(perf_evaluator_output)
+            #plot_eval_trajectories_candidates_mistake_trajectories2(perf_evaluator_output)
+            #plot_eval_trajectories_candidates_mistake_trajectories(perf_evaluator_output)
 
             """
             if perf_eval_length >=config_s.env.solved_return_threshold:
@@ -593,6 +594,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             elapsed_time = time.time() - start_time
             perf_eval_length = log_evaluation_metrics_performance_agent_for_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
             print(f"Performance eval length: {perf_eval_length}")
+            print(f"Safety_assured_counter: {safety_assured_counter}")
             if safety_assured_counter >= 2:
                 break
 
@@ -693,7 +695,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
 
 @hydra.main(
     config_path="../../configs/default/anakin",
-    config_name="default_double_learning2.yaml",
+    config_name="default_double_learning_half.yaml",
     version_base="1.2",
 )
 def hydra_entry_point(cfg: DictConfig) -> float:
@@ -727,8 +729,8 @@ def hydra_entry_point(cfg: DictConfig) -> float:
             #print(cfg_performance)
             # Run experiment.
             #jax.debug.breakpoint()
-            cfg_safety.env.kwargs.bonus = bonus
-            cfg_safety.logger.kwargs.name =f"AblationRangeOfVValuesWithFilterFactor_{i}"
+            #cfg_safety.env.kwargs.bonus = bonus
+            cfg_safety.logger.kwargs.name =f"HalfcheetahTest{i}"
             eval_performance = run_experiment(cfg_safety, cfg_performance)
             print(f"It took {eval_performance} Iterations to learn safety")
             print(f"{Fore.CYAN}{Style.BRIGHT}Double Learning experiment completed{Style.RESET_ALL}")
@@ -738,5 +740,13 @@ def hydra_entry_point(cfg: DictConfig) -> float:
 
 
 if __name__ == "__main__":
+    # Disable JIT
+    #config.update("jax_disable_jit", True)
+
+    # Disable VMAP (by forcing it to act like a for-loop)
+    #jax.vmap = lambda f, *args, **kwargs: lambda *a, **kw: [f(x, *a[1:], **kw) for x in a[0]]
+
+    # Disable PMAP (by running on a single device)
+    #jax.pmap = lambda f, *args, **kwargs: lambda *a, **kw: f(*a, **kw)
     print(jax.default_backend())
     hydra_entry_point()

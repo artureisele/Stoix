@@ -3,7 +3,7 @@ defaults:
   - arch: anakin
   - system: ppo/ff_ppo
   - network: mlp_continuous
-  - env: custom/cartpole_hyperplane
+  - env: brax/halfcheetah
   - _self_
 
 hydra:

@@ -79,17 +79,14 @@ def get_learner_fn(
         ) -> Tuple[OnPolicyLearnerState, PPOTransition]:
             """Step the environment."""
             params, opt_states, key, env_state, last_timestep = learner_state
-
             # SELECT ACTION
             key, policy_key = jax.random.split(key)
             actor_policy = actor_apply_fn(params.actor_params, last_timestep.observation)
             value = critic_apply_fn(params.critic_params, last_timestep.observation)
             action = actor_policy.sample(seed=policy_key)
             log_prob = actor_policy.log_prob(action)
-
             # STEP ENVIRONMENT
             env_state, timestep = jax.vmap(env.step, in_axes=(0, 0))(env_state, action)
-
             # LOG EPISODE METRICS
             done = (timestep.discount == 0.0).reshape(-1)
             truncated = (timestep.last() & (timestep.discount != 0.0)).reshape(-1)
@@ -109,10 +106,10 @@ def get_learner_fn(
             return learner_state, transition
 
         # STEP ENVIRONMENT FOR ROLLOUT LENGTH
+        _env_step=jax.jit(_env_step)
         learner_state, traj_batch = jax.lax.scan(
             _env_step, learner_state, None, config.system.rollout_length
         )
-
         # CALCULATE ADVANTAGE
         params, opt_states, key, env_state, last_timestep = learner_state
         last_val = critic_apply_fn(params.critic_params, last_timestep.observation)
@@ -340,7 +337,6 @@ def get_learner_fn(
         
 
         update_state = (params, opt_states, traj_batch, advantages, targets, key, jnp.atleast_1d(jnp.zeros((1,),dtype=jnp.float32)))
-
         # UPDATE EPOCHS
         update_state, loss_info_actor = jax.lax.scan(
             _update_epoch_actor_eventually, update_state, None, config.system.epochs
@@ -348,7 +344,6 @@ def get_learner_fn(
         update_state, loss_info_critic_and_actor = jax.lax.scan(
             _update_epoch_critic, update_state, loss_info_actor, config.system.epochs
         )
-
         params, opt_states, traj_batch, advantages, targets, key, kl_estimate = update_state
         learner_state = OnPolicyLearnerState(params, opt_states, key, env_state, last_timestep)
         metric = traj_batch.info
@@ -528,7 +523,7 @@ def run_experiment(_config: DictConfig) -> float:
     )
 
     # Setup learner.
-    learn, actor_network, learner_state = learner_setup(
+    learn, actor_network, critic_network, learner_state = learner_setup(
         env, (key, actor_net_key, critic_net_key), config
     )
 

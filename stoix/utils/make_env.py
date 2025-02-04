@@ -14,6 +14,7 @@ from brax.envs import _envs as brax_environments
 from brax.envs import create as brax_make
 from gymnax import registered_envs as gymnax_environments
 from stoix.custom_envs import register as custom_register
+from stoix.custom_envs import register_brax as custom_register_brax
 from jaxmarl.environments.smax import map_name_to_scenario
 from jaxmarl.registration import registered_envs as jaxmarl_environments
 from jumanji.env import Environment
@@ -97,6 +98,28 @@ def make_custom_env(env_name: str, config: DictConfig, custom_extras: dict={}) -
     eval_env_params = eval_env.eval_params
     env = GymnaxWrapper(env, env_params)
     eval_env = GymnaxWrapper(eval_env, eval_env_params)
+
+    env = AutoResetWrapper(env, next_obs_in_extras=True)
+    env = RecordEpisodeMetrics(env)
+
+    return env, eval_env
+
+def make_custom_brax(env_name: str, config: DictConfig, custom_extras: dict={}) -> Tuple[Environment, Environment]:
+    """
+    Create a custom environments for training and evaluation.
+
+    Args:
+        env_name (str): The name of the environment to create.
+        config (Dict): The configuration of the environment.
+
+    Returns:
+        A tuple of the environments.
+    """
+    # Config generator and select the wrapper.
+    # Create envs.
+    env = custom_register_brax.make(env_name, **config.env.kwargs, **custom_extras)
+    eval_env = custom_register_brax.make(env_name, **config.env.kwargs,**custom_extras)
+
 
     env = AutoResetWrapper(env, next_obs_in_extras=True)
     env = RecordEpisodeMetrics(env)
@@ -424,7 +447,9 @@ def make(config: DictConfig, custom_extras:dict = {}) -> Tuple[Environment, Envi
     """
     env_name = config.env.scenario.name
 
-    if env_name in custom_register.registered_envs:
+    if env_name in custom_register_brax.registered_envs:
+        envs = make_custom_brax(env_name, config, custom_extras)
+    elif env_name in custom_register.registered_envs:
         envs = make_custom_env(env_name, config, custom_extras)
     elif env_name in gymnax_environments:
         envs = make_gymnax_env(env_name, config)
