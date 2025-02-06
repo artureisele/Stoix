@@ -39,7 +39,32 @@ class CategoricalHead(nn.Module):
 
         return Categorical(logits=logits)
 
+class NormalAffineTanhDistributionHeadPPO(nn.Module):
 
+    action_dim: int
+    minimum: float
+    maximum: float
+    min_scale: float = 1e-3
+    kernel_init: Initializer = orthogonal(0.01)
+
+    def setup(self):
+        # Learnable log_std initialized to log(0.5) (~ -0.5)
+        self.log_std = self.param("log_std", lambda rng: jnp.full((self.action_dim), -0.5))
+    @nn.compact
+    def __call__(self, embedding: chex.Array) -> Independent:
+
+        loc = nn.Dense(self.action_dim, kernel_init=self.kernel_init)(embedding)
+        #scale = (
+        #    jax.nn.softplus(nn.Dense(self.action_dim, kernel_init=self.kernel_init)(embedding))
+        #    + self.min_scale
+        #)
+        scale = jax.nn.softplus(self.log_std) + self.min_scale
+        distribution = Normal(loc=loc, scale=scale)
+
+        return Independent(
+            AffineTanhTransformedDistribution(distribution, self.minimum, self.maximum),
+            reinterpreted_batch_ndims=1,
+        )
 class NormalAffineTanhDistributionHead(nn.Module):
 
     action_dim: int

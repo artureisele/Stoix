@@ -10,7 +10,7 @@ from jumanji.env import Environment, State
 from jumanji.types import StepType, TimeStep, restart
 import jax
 from typing_extensions import NamedTuple
-from brax.spring.base import State as StateSpring
+from brax.generalized.base import State as StateGen
 @struct.dataclass
 class BraxState(base.Base):
     pipeline_state: Optional[base.State]
@@ -58,6 +58,7 @@ class HalfcheetahPerfWrapper(BraxWrapper):
     def zero_batch_brax_state(self):
         episode_length = 500
         eval_epsisodes = 20
+        """" Thats for spring
         return BraxState(
             pipeline_state=StateSpring(
                 q=jnp.zeros((eval_epsisodes, episode_length, 9), dtype=jnp.float32),
@@ -98,6 +99,56 @@ class HalfcheetahPerfWrapper(BraxWrapper):
                 "truncation": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32)
             }
         )
+        """
+        return BraxState(
+            pipeline_state=StateGen(
+                q=jnp.zeros((eval_epsisodes, episode_length, 9), dtype=jnp.float32),
+                qd=jnp.zeros((eval_epsisodes, episode_length, 9), dtype=jnp.float32),
+                x= base.Transform(pos=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                  rot=jnp.zeros((eval_epsisodes, episode_length, 7, 4), dtype=jnp.float32)),
+                xd = base.Motion(ang=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                 vel=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32)),
+                contact = None,
+                root_com=jnp.zeros((eval_epsisodes, episode_length, 7,3), dtype=jnp.float32),
+                cinr= base.Inertia(
+                    transform=base.Transform(pos=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                  rot=jnp.zeros((eval_epsisodes, episode_length, 7, 4), dtype=jnp.float32)),
+                    i = jnp.zeros((eval_epsisodes, episode_length, 7, 3,3), dtype=jnp.float32),
+                    mass= jnp.zeros((eval_epsisodes, episode_length, 7), dtype=jnp.float32)
+                ),
+                cd = base.Motion(ang=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                 vel=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32)),
+                cdof=base.Motion(ang=jnp.zeros((eval_epsisodes, episode_length, 9, 3), dtype=jnp.float32),
+                                 vel=jnp.zeros((eval_epsisodes, episode_length, 9, 3), dtype=jnp.float32)),
+                cdofd=base.Motion(ang=jnp.zeros((eval_epsisodes, episode_length, 9, 3), dtype=jnp.float32),
+                                 vel=jnp.zeros((eval_epsisodes, episode_length, 9, 3), dtype=jnp.float32)),
+                mass_mx= jnp.zeros((eval_epsisodes, episode_length, 9,9), dtype=jnp.float32),
+                mass_mx_inv= jnp.zeros((eval_epsisodes, episode_length, 9,9), dtype=jnp.float32),
+                con_jac=jnp.zeros((eval_epsisodes, episode_length, 49,9), dtype=jnp.float32),
+                con_diag=jnp.zeros((eval_epsisodes, episode_length, 49), dtype=jnp.float32),
+                con_aref=jnp.zeros((eval_epsisodes, episode_length, 49), dtype=jnp.float32),
+                qf_smooth=jnp.zeros((eval_epsisodes, episode_length, 9), dtype=jnp.float32),
+                qf_constraint=jnp.zeros((eval_epsisodes, episode_length, 9), dtype=jnp.float32),
+                qdd = jnp.zeros((eval_epsisodes, episode_length, 9), dtype=jnp.float32),
+            ),
+            obs=jnp.zeros((eval_epsisodes, episode_length, 17), dtype=jnp.float32),
+            reward = jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+            done = jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+            key = jnp.zeros((eval_epsisodes, episode_length,2), dtype=jnp.uint32),
+            step_count = jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.int32),
+            metrics={
+                "reward_ctrl": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+                "reward_run": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+                "x_position": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+                "x_velocity": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32)
+            },
+            info  = {
+                "steps": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+                "truncation": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32)
+            })
+
+
+
     def reset(self, key: chex.PRNGKey) -> Tuple[State, TimeStep]:
 
         state = self._env.reset(key)

@@ -374,7 +374,6 @@ def plot_starting_states(starting_states, perf_evaluator_output):
 
     # Set the plot boundaries
     eval_traj_plot = plt.scatter(starting_states.obs[:,0], starting_states.obs[:,1], s=10)
-    plt.axis([-2 * 2.4, 2 * 2.4, -2 * 24 * 2 * math.pi / 360, 2 * 24 * 2 * math.pi / 360])
     plt.xlabel("Z")
     plt.ylabel("Theta")
     plt.title("Safety_Training_Starting_States")
@@ -567,6 +566,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
             all_action_taken_safety= perf_evaluator_output.action_taken_safety
             all_trajectories = perf_evaluator_output.trajectories
             all_trajectories_flat = index_tree(all_trajectories,0)
+
             result_best_local = perf_evaluator_output.episode_metrics["episode_return"].max()
             if perf_eval_best_reward <= result_best_local:
                 argmax_eval_index = perf_evaluator_output.episode_metrics["episode_return"].argmax()
@@ -581,10 +581,10 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
                 max_filter_indices = jnp.argmax(all_filter_factors, axis=1)
                 #exploration_starting_states = all_trajectories[jnp.arange(all_trajectories.shape[0]), max_filter_indices]
                 random_rows_indices = jax.random.choice(key, all_trajectories_flat.obs.shape[0], shape=(400,), replace=True)
-                column_index = jnp.arange(all_trajectories_flat.obs.shape[0].shape[1]-100)
+                column_index = jnp.arange(all_trajectories_flat.obs.shape[1]-100)
                 #jax.debug.breakpoint()
                 exploration_starting_states = index_tree_2(all_trajectories_flat,random_rows_indices.astype(int), column_index.astype(int))
-                exploration_starting_states = flatten_tree(exploration_starting_states)
+                #exploration_starting_states = flatten_tree(exploration_starting_states)
                 plot_starting_states(exploration_starting_states, perf_evaluator_output)
                 starting_states = exploration_starting_states
             else:

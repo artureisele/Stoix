@@ -29,6 +29,6 @@ checkpointing:
     keep_period: ~ # Don't delete any checkpoint where step % keep_period == 0
     checkpoint_uid: ~ # Unique identifier for checkpoint to save. Defaults to timestamp
 
-  load_model: False # Whether to load model checkpoints.
+  load_model: True # Whether to load model checkpoints.
   load_args:
-    checkpoint_uid: "20250205132853" # Unique identifier for checkpoint to load.
+    checkpoint_uid: "First500" # Unique identifier for checkpoint to load.

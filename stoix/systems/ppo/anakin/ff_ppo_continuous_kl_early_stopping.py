@@ -85,6 +85,7 @@ def get_learner_fn(
             value = critic_apply_fn(params.critic_params, last_timestep.observation)
             action = actor_policy.sample(seed=policy_key)
             log_prob = actor_policy.log_prob(action)
+
             # STEP ENVIRONMENT
             env_state, timestep = jax.vmap(env.step, in_axes=(0, 0))(env_state, action)
             # LOG EPISODE METRICS
@@ -106,7 +107,6 @@ def get_learner_fn(
             return learner_state, transition
 
         # STEP ENVIRONMENT FOR ROLLOUT LENGTH
-        _env_step=jax.jit(_env_step)
         learner_state, traj_batch = jax.lax.scan(
             _env_step, learner_state, None, config.system.rollout_length
         )
@@ -114,10 +114,12 @@ def get_learner_fn(
         params, opt_states, key, env_state, last_timestep = learner_state
         last_val = critic_apply_fn(params.critic_params, last_timestep.observation)
 
+
         r_t = traj_batch.reward
         v_t = jnp.concatenate([traj_batch.value, last_val[None, ...]], axis=0)
         d_t = 1.0 - traj_batch.done.astype(jnp.float32)
         d_t = (d_t * config.system.gamma).astype(jnp.float32)
+
         advantages, targets = batch_truncated_generalized_advantage_estimation(
             r_t,
             d_t,
