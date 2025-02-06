@@ -9,9 +9,8 @@ from jumanji import specs
 from jumanji.env import Environment, State
 from jumanji.types import StepType, TimeStep, restart
 import jax
-from stoix.base_types import Observation
-
-
+from typing_extensions import NamedTuple
+from brax.spring.base import State as StateSpring
 @struct.dataclass
 class BraxState(base.Base):
     pipeline_state: Optional[base.State]
@@ -22,8 +21,17 @@ class BraxState(base.Base):
     step_count: chex.Array
     metrics: Dict[str, jnp.ndarray] = struct.field(default_factory=dict)
     info: Dict[str, Any] = struct.field(default_factory=dict)
+class Observation(NamedTuple):
+    """The observation that the agent sees.
+    agent_view: the agent's view of the environment.
+    action_mask: boolean array specifying which action is legal.
+    step_count: the number of steps elapsed since the beginning of the episode.
+    """
 
-
+    agent_view: chex.Array  # (num_obs_features,)
+    action_mask: chex.Array  # (num_actions,)
+    step_count: Optional[chex.Array] = None  # (,)
+    
 class HalfcheetahPerfWrapper(BraxWrapper):
     def __init__(
         self,
@@ -31,7 +39,8 @@ class HalfcheetahPerfWrapper(BraxWrapper):
         safety_filter_function = None,
         safety_filter_params = None,
         safe_filter_q = None,
-        safe_filter_q_params = None
+        safe_filter_q_params = None,
+        backend = None
     ):
         """Initialises a Brax wrapper.
 
@@ -46,6 +55,49 @@ class HalfcheetahPerfWrapper(BraxWrapper):
         self.safe_filter_q = safe_filter_q
         self.safe_filter_q_params = safe_filter_q_params
 
+    def zero_batch_brax_state(self):
+        episode_length = 500
+        eval_epsisodes = 20
+        return BraxState(
+            pipeline_state=StateSpring(
+                q=jnp.zeros((eval_epsisodes, episode_length, 9), dtype=jnp.float32),
+                qd=jnp.zeros((eval_epsisodes, episode_length, 9), dtype=jnp.float32),
+                x= base.Transform(pos=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                  rot=jnp.zeros((eval_epsisodes, episode_length, 7, 4), dtype=jnp.float32)),
+                xd = base.Motion(ang=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                 vel=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32)),
+                contact = None,
+                x_i= base.Transform(pos=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                  rot=jnp.zeros((eval_epsisodes, episode_length, 7, 4), dtype=jnp.float32)),
+                xd_i = base.Motion(ang=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                 vel=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32)),
+                j= base.Transform(pos=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                  rot=jnp.zeros((eval_epsisodes, episode_length, 7, 4), dtype=jnp.float32)),
+                jd = base.Motion(ang=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                 vel=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32)),
+                a_p= base.Transform(pos=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                  rot=jnp.zeros((eval_epsisodes, episode_length, 7, 4), dtype=jnp.float32)),
+                a_c= base.Transform(pos=jnp.zeros((eval_epsisodes, episode_length, 7, 3), dtype=jnp.float32),
+                                  rot=jnp.zeros((eval_epsisodes, episode_length, 7, 4), dtype=jnp.float32)),
+                i_inv=jnp.zeros((eval_epsisodes, episode_length, 7,3, 3), dtype=jnp.float32),
+                mass=jnp.zeros((eval_epsisodes, episode_length, 7), dtype=jnp.float32)
+            ),
+            obs=jnp.zeros((eval_epsisodes, episode_length, 17), dtype=jnp.float32),
+            reward = jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+            done = jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+            key = jnp.zeros((eval_epsisodes, episode_length,2), dtype=jnp.uint32),
+            step_count = jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.int32),
+            metrics={
+                "reward_ctrl": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+                "reward_run": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+                "x_position": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+                "x_velocity": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32)
+            },
+            info  = {
+                "steps": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32),
+                "truncation": jnp.zeros((eval_epsisodes, episode_length), dtype=jnp.float32)
+            }
+        )
     def reset(self, key: chex.PRNGKey) -> Tuple[State, TimeStep]:
 
         state = self._env.reset(key)
@@ -60,6 +112,7 @@ class HalfcheetahPerfWrapper(BraxWrapper):
             info=state.info,
             step_count=jnp.array(0, dtype=int),
         )
+
         agent_view = new_state.obs.astype(float)
         legal_action_mask = jnp.ones((self._action_dim,), dtype=float)
 
@@ -76,13 +129,20 @@ class HalfcheetahPerfWrapper(BraxWrapper):
 
     def step(self, state: State, action: chex.Array) -> Tuple[State, TimeStep]:
         action_proposal = action
+        key, key2, key3 = jax.random.split(state.key, 3)
         if self.safety_filter_function!=None and self.safety_filter_params!=None:
-            observation = state.obs
-            q_value_safety = self.safe_filter_q(self.safe_filter_q_params, observation)
+            agent_view = state.obs.astype(float)
+            legal_action_mask = jnp.ones((self._action_dim,), dtype=float)
+            obs = Observation(
+                agent_view,
+                legal_action_mask,
+                state.step_count,
+            )
+            q_value_safety = self.safe_filter_q(self.safe_filter_q_params, obs)
             action_safety_filter = self.safety_filter_function(
                 self.safety_filter_params,
-                observation,
-                key,
+                obs,
+                key3,
             )
             a_h = action_safety_filter[:-1]/jnp.linalg.norm(action_safety_filter[:-1])
             b_h = action_safety_filter[-1]*jnp.pow(6,0.5)
@@ -106,8 +166,8 @@ class HalfcheetahPerfWrapper(BraxWrapper):
         prev_truncated = state.info["truncation"].astype(jnp.bool_)
         # If the previous step was done
         prev_terminated = state.done.astype(jnp.bool_)
-        key, key2 = jax.random.split(state.key, 2)
-        state = self._env.step(state, action, key2)
+        
+        state = self._env.step(state, action)
 
 
         # This is true only if truncated

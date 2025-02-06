@@ -31,7 +31,8 @@ class HalfcheetahHyperplaneWrapper(BraxWrapper):
         mistake_trajectories=None, 
         bonus = 0.5, 
         perf_policy_func = None, 
-        perf_policy_params = None
+        perf_policy_params = None,
+        backend = None
     ):
         """Initialises a Brax wrapper.
 
@@ -46,6 +47,8 @@ class HalfcheetahHyperplaneWrapper(BraxWrapper):
         self.bonus = bonus
         self.perf_policy_func = perf_policy_func
         self.perf_policy_params = perf_policy_params 
+
+    #def create_zero_state(batch: int) -> BraxState:
 
     def reset(self, key: chex.PRNGKey) -> Tuple[State, TimeStep]:
         """Performs resetting of environment."""
@@ -62,34 +65,41 @@ class HalfcheetahHyperplaneWrapper(BraxWrapper):
                 info=state.info,
                 step_count=jnp.array(0, dtype=int),
             )
-            agent_view = new_state.obs.astype(float)
-            legal_action_mask = jnp.ones((self._action_dim,), dtype=float)
-
-            timestep = restart(
-                observation=Observation(
-                    agent_view,
-                    legal_action_mask,
-                    new_state.step_count,
-                ),
-                extras={"q_safe_value":-150, "safe_action":jnp.zeros((7), ),"filter_factor":-1.0},
-        )
         else:
-            num_trajectories = self.mistake_trajectories.shape[0]
-            sampled_idx = jax.random.randint(key, shape=(), minval=0, maxval=num_trajectories)
-            sampled_trajectory = self.mistake_trajectories[sampled_idx]
-            new_state = sampled_trajectory
-            new_state = new_state.replace(step_count = jnp.array(0, dtype=int))
-            agent_view = new_state.obs.astype(float)
-            legal_action_mask = jnp.ones((self._action_dim,), dtype=float)
+            state = self._env.reset(key)
 
-            timestep = restart(
-                observation=Observation(
-                    agent_view,
-                    legal_action_mask,
-                    new_state.step_count,
-                ),
-                extras={"q_safe_value":-150, "safe_action":jnp.zeros((7), ),"filter_factor":-1.0},
+            new_state = BraxState(
+                pipeline_state=state.pipeline_state,
+                obs=state.obs,
+                reward=state.reward,
+                done=state.done,
+                key=key,
+                metrics=state.metrics,
+                info=state.info,
+                step_count=jnp.array(0, dtype=int),
             )
+
+            num_trajectories = self.mistake_trajectories.obs.shape[0]
+            sampled_idx = jax.random.randint(key, shape=(), minval=0, maxval=num_trajectories)
+            def index_tree(container, idx):
+                def index_leaf(old):
+                    return old[idx]
+                return jax.tree.map(index_leaf, container)
+            sampled_trajectory = index_tree(self.mistake_trajectories,sampled_idx)
+            new_state_sampled = sampled_trajectory
+            new_state = new_state.replace(pipeline_state = new_state_sampled.pipeline_state)
+            new_state = new_state.replace(obs = new_state_sampled.obs)
+        agent_view = new_state.obs.astype(float)
+        legal_action_mask = jnp.ones((self._action_dim,), dtype=float)
+
+        timestep = restart(
+            observation=Observation(
+                agent_view,
+                legal_action_mask,
+                new_state.step_count,
+            ),
+            extras={"q_safe_value":-150, "safe_action":jnp.zeros((7), ),"filter_factor":-1.0},
+        )
 
         return new_state, timestep
 
@@ -101,8 +111,8 @@ class HalfcheetahHyperplaneWrapper(BraxWrapper):
         key1, key2 = jax.random.split(state.key)
         action_proposal = jax.random.uniform(key1, (6), minval=-1.0, maxval=1.0)
         action_proposal_freedom = jax.random.uniform(key2, (6,100), minval=-1.0, maxval=1.0)
-        filter_factor = (jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.6]))-0.6)
-
+        #filter_factor = (jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.9]))-0.9)
+        filter_factor = 0
         def proj_fn(inp):
             a,a_h,b_h = inp
             numerator = (jnp.dot(a_h, a) - b_h)

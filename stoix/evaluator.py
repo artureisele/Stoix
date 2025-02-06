@@ -101,7 +101,7 @@ def get_ff_evaluator_fn_track_failed_trajectories(
         def _env_step(mistake_eval_state: MistakeEvalState) -> MistakeEvalState:
             """Step the environment."""
             # PRNG keys.
-            key, env_state, last_timestep, step_count, episode_return, trajectory,safe_q_value, action_taken_performance, action_taken_safety, filter_factor= mistake_eval_state
+            key, last_env_state, last_timestep, step_count, episode_return, trajectory,safe_q_value, action_taken_performance, action_taken_safety, filter_factor= mistake_eval_state
 
             # Select action.
             key, policy_key = jax.random.split(key)
@@ -114,11 +114,16 @@ def get_ff_evaluator_fn_track_failed_trajectories(
             )
 
             # Step environment.
-            env_state, timestep = env.step(env_state, action.squeeze())
+            env_state, timestep = env.step(last_env_state, action.squeeze())
 
             # Log episode metrics.
             episode_return += timestep.reward
             step_count += 1
+            def update_tree(container, idx, new_subtree):
+                def update_leaf(old, new):
+                    # old has shape (batch, ...) and new has shape (1, ...)
+                    return old.at[idx].set(new)
+                return jax.tree.map(update_leaf, container, new_subtree)
 
             mistake_eval_state = MistakeEvalState(
                 key,
@@ -126,7 +131,7 @@ def get_ff_evaluator_fn_track_failed_trajectories(
                 timestep,
                 step_count,
                 episode_return,
-                trajectory=trajectory.at[step_count-1].set(last_timestep.observation.agent_view),
+                trajectory=update_tree(trajectory,step_count-1,last_env_state),
                 safe_q_value=safe_q_value.at[step_count-1].set(last_timestep.extras["q_safe_value"]),
                 action_taken_performance=action_taken_performance.at[step_count-1].set(action[0]),
                 action_taken_safety=action_taken_safety.at[step_count-1].set(last_timestep.extras["safe_action"]),
@@ -141,7 +146,6 @@ def get_ff_evaluator_fn_track_failed_trajectories(
             return is_not_done
         final_state = jax.lax.while_loop(not_done, _env_step, init_eval_mistake_state)
         #TODO Check that this really handles the truncation case. Super Imptortant
-        trajectory = jax.lax.cond(jnp.squeeze(final_state.step_count)!=env.eval_params.max_steps_in_episode,lambda: final_state.trajectory, lambda:empty_trajectory)
         eval_metrics = {
             "episode_return": final_state.episode_return,
           
@@ -158,7 +162,7 @@ def get_ff_evaluator_fn_track_failed_trajectories(
         action_taken_performance = final_state.action_taken_performance
         action_taken_safety = final_state.action_taken_safety
         #Trajectory is != 0 only if it failed, complete_trajectory returns the trajectory independent of failure
-        return eval_metrics, trajectory, complete_trajectory, safe_q_values, action_taken_performance, action_taken_safety, filter_factor
+        return eval_metrics, complete_trajectory, safe_q_values, action_taken_performance, action_taken_safety, filter_factor
 
     def evaluator_fn(trained_params: FrozenDict, key: chex.PRNGKey) -> EvaluationOutputTrajectory[EvalState]:
         """Evaluator function."""
@@ -183,21 +187,20 @@ def get_ff_evaluator_fn_track_failed_trajectories(
             timestep=timesteps,
             step_count=jnp.zeros((eval_batch, 1), dtype=jnp.int32),
             episode_return=jnp.zeros_like(timesteps.reward),
-            trajectory=jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode, *observation_shape)),
-            safe_q_value =jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode)),
-            action_taken_performance = jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode)),
-            action_taken_safety=jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode, 2)),
-            filter_factor=jnp.zeros((eval_batch, env.eval_params.max_steps_in_episode))
+            trajectory=env.zero_batch_brax_state(), #complex pytreee eval_batch x return_threshold x ...
+            safe_q_value =jnp.zeros((eval_batch, int(config.env.solved_return_threshold))),
+            action_taken_performance = jnp.zeros((eval_batch, int(config.env.solved_return_threshold),6)),
+            action_taken_safety=jnp.zeros((eval_batch, int(config.env.solved_return_threshold), 7)),
+            filter_factor=jnp.zeros((eval_batch, int(config.env.solved_return_threshold)))
         )
-        eval_metrics, final_mistake_trajectories, complete_trajectories, safe_q_values,action_taken_performance,action_taken_safety, filter_factor = jax.vmap(
+        eval_metrics, complete_trajectories, safe_q_values,action_taken_performance,action_taken_safety, filter_factor = jax.vmap(
             eval_one_episode,
             in_axes=(None, 0),
-            out_axes=(0,0,0,0,0,0,0),
+            out_axes=(0,0,0,0,0,0),
             axis_name="eval_batch",
         )(trained_params, mistake_eval_state)
 
         return EvaluationOutputTrajectory(
-            learner_state=final_mistake_trajectories,
             episode_metrics=eval_metrics,
             trajectories=complete_trajectories,
             safe_q_values = safe_q_values,
@@ -615,7 +618,7 @@ def get_sebulba_eval_fn(
                 # find the first instance of done to get the metrics at that timestep, we don't
                 # care about subsequent steps because we only the results from the first episode
                 done_idx = np.argmax(dones, axis=0)
-                metrics = jax.tree_map(lambda m: m[done_idx, np.arange(n_parallel_envs)], metrics)
+                metrics = jax.tree.map(lambda m: m[done_idx, np.arange(n_parallel_envs)], metrics)
                 del metrics["is_terminal_step"]  # unneeded for logging
 
                 return key, metrics
@@ -628,7 +631,7 @@ def get_sebulba_eval_fn(
             key, metric = _run_episodes(key)
             metrics.append(metric)
 
-        metrics: Dict = jax.tree_map(
+        metrics: Dict = jax.tree.map(
             lambda *x: np.array(x).reshape(-1), *metrics
         )  # flatten metrics
         return metrics

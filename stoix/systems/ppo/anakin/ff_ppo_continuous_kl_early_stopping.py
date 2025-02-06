@@ -462,6 +462,16 @@ def learner_setup(
     env_states, timesteps = jax.vmap(env.reset, in_axes=(0))(
         jnp.stack(env_keys),
     )
+    # Load model from checkpoint if specified.
+    if config.logger.checkpointing.load_model:
+        loaded_checkpoint = Checkpointer(
+            model_name=config.system.system_name,
+            **config.logger.checkpointing.load_args,  # Other checkpoint args
+        )
+        # Restore the learner state from the checkpoint
+        restored_params, _ = loaded_checkpoint.restore_params(timestep=0)
+        # Update the params
+        params = restored_params
     reshape_states = lambda x: x.reshape(
         (n_devices, config.arch.update_batch_size, config.arch.num_envs) + x.shape[1:]
     )
@@ -470,15 +480,15 @@ def learner_setup(
     timesteps = jax.tree_util.tree_map(reshape_states, timesteps)
 
     # Load model from checkpoint if specified.
-    if config.logger.checkpointing.load_model:
-        loaded_checkpoint = Checkpointer(
-            model_name=config.system.system_name,
-            **config.logger.checkpointing.load_args,  # Other checkpoint args
-        )
+    #if config.logger.checkpointing.load_model:
+        #loaded_checkpoint = Checkpointer(
+            #model_name=config.system.system_name,
+            #**config.logger.checkpointing.load_args,  # Other checkpoint args
+        #)
         # Restore the learner state from the checkpoint
-        restored_params, _ = loaded_checkpoint.restore_params()
+        #restored_params, _ = loaded_checkpoint.restore_params(timestep=0)
         # Update the params
-        params = restored_params
+        #params = restored_params
 
     # Define params to be replicated across devices and batches.
     key, step_key = jax.random.split(key)

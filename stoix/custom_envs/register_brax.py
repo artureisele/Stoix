@@ -21,13 +21,13 @@ def make(env_id: str, **env_kwargs):
 
     # 1. Classic OpenAI Control Tasks
     if env_id == "HalfcheetahHyperplane":
-        env = half_cheetah.Halfcheetah(backend="mjx")
+        env = half_cheetah.Halfcheetah()
         env = training.EpisodeWrapper(env, 500, 1)
         #Modified BraxJumanjiWrapper
         env = HalfcheetahSafeWrapper(env, **env_kwargs)
         #env = BraxJumanjiWrapper(env)
     if env_id == "HalfcheetahPerformance":
-        env = half_cheetah.Halfcheetah(backend="mjx")
+        env = half_cheetah.Halfcheetah()
         env = training.EpisodeWrapper(env, 500, 1)
         env = HalfcheetahPerfWrapper(env, **env_kwargs)
         ##env = BraxJumanjiWrapper(env)

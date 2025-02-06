@@ -26,6 +26,7 @@ from stoix.base_types import (
     OffPolicyLearnerState,
     OnlineAndTarget,
 )
+import jax.random as random
 from stoix.evaluator import evaluator_setup, get_distribution_act_fn
 from stoix.networks.base import CompositeNetwork
 from stoix.networks.base import FeedForwardActor as Actor
@@ -63,13 +64,10 @@ def get_warmup_fn(
             #actor_policy = actor_apply_fn(params.actor_params, last_timestep.observation)
             #action2 = actor_policy.sample(seed=policy_key)
             #Uniform Warmup
-            action_space = env.action_space()
             #TODO Find Universal Solution for all environments
-            number_of_envs = env_state.env_state.gymnax_env_state.time.shape
-            action = jax.random.uniform(
-                policy_key, shape=(*number_of_envs,*action_space.shape), minval=action_space.low, maxval=action_space.high
-            ).astype(action_space.dtype)
+            number_of_envs = config.arch.total_num_envs
 
+            action = random.uniform(policy_key, shape=(number_of_envs,env.action_size,), minval=-1.0, maxval=1.0)
             # STEP ENVIRONMENT
             env_state, timestep = jax.vmap(env.step, in_axes=(0, 0))(env_state, action)
 
@@ -495,15 +493,15 @@ def learner_setup(
     timesteps = jax.tree_util.tree_map(reshape_states, timesteps)
 
     # Load model from checkpoint if specified.
-    if config.logger.checkpointing.load_model:
-        loaded_checkpoint = Checkpointer(
-            model_name=config.system.system_name,
-            **config.logger.checkpointing.load_args,  # Other checkpoint args
-        )
+    #if config.logger.checkpointing.load_model:
+        #loaded_checkpoint = Checkpointer(
+            #model_name=config.system.system_name,
+            #**config.logger.checkpointing.load_args,  # Other checkpoint args
+        #)
         # Restore the learner state from the checkpoint
-        restored_params, _ = loaded_checkpoint.restore_params(TParams=SACParams)
+        #restored_params, _ = loaded_checkpoint.restore_params(TParams=SACParams)
         # Update the params
-        params = restored_params
+        #params = restored_params
 
     # Define params to be replicated across devices and batches.
     key, step_key, warmup_key = jax.random.split(key, num=3)

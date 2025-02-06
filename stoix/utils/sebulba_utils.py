@@ -126,14 +126,14 @@ class OnPolicyPipeline(threading.Thread):
     def stack_trajectory(self, trajectory: List[StoixTransition]) -> StoixTransition:
         """Stack a list of parallel_env transitions into a single
         transition of shape [rollout_len, num_envs, ...]."""
-        return jax.tree_map(lambda *x: jnp.stack(x, axis=0), *trajectory)  # type: ignore
+        return jax.tree.map(lambda *x: jnp.stack(x, axis=0), *trajectory)  # type: ignore
 
     @partial(jax.jit, static_argnums=(0,))
     def concatenate_metrics(
         self, actor_metrics: List[Dict[str, List[float]]]
     ) -> Dict[str, List[float]]:
         """Concatenate a list of actor metrics into a single dictionary."""
-        return jax.tree_map(lambda *x: jnp.concatenate(x, axis=0), *actor_metrics)  # type: ignore
+        return jax.tree.map(lambda *x: jnp.concatenate(x, axis=0), *actor_metrics)  # type: ignore
 
     def shard_split_playload(self, payload: Any, axis: int = 0) -> Any:
         split_payload = jnp.split(payload, len(self.learner_devices), axis=axis)

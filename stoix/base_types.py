@@ -7,7 +7,10 @@ from flax.core.frozen_dict import FrozenDict
 from jumanji.types import TimeStep
 from optax import OptState
 from typing_extensions import NamedTuple, TypeAlias
-
+from stoix.custom_envs.halfcheetah_performance import BraxState
+from brax import base
+from flax import struct
+import jax.numpy as jnp
 if TYPE_CHECKING:  # https://github.com/python/mypy/issues/6239
     from dataclasses import dataclass
 else:
@@ -26,6 +29,19 @@ Parameters: TypeAlias = Any
 OptStates: TypeAlias = Any
 HiddenStates: TypeAlias = Any
 
+
+
+
+@struct.dataclass
+class BraxState(base.Base):
+    pipeline_state: Optional[base.State]
+    obs: chex.Array
+    reward: chex.Numeric
+    done: chex.Numeric
+    key: chex.PRNGKey
+    step_count: chex.Array
+    metrics: Dict[str, jnp.ndarray] = struct.field(default_factory=dict)
+    info: Dict[str, Any] = struct.field(default_factory=dict)
 
 class Observation(NamedTuple):
     """The observation that the agent sees.
@@ -79,7 +95,7 @@ class MistakeEvalState(NamedTuple):
     timestep: TimeStep
     step_count: chex.Array
     episode_return: chex.Array
-    trajectory: chex.Array
+    trajectory: BraxState
     safe_q_value: chex.Array
     action_taken_performance: chex.Array
     action_taken_safety: chex.Array
@@ -198,7 +214,6 @@ class EvaluationOutput(NamedTuple, Generic[StoixState]):
 class EvaluationOutputTrajectory(NamedTuple, Generic[StoixState]):
     """Evaluation output."""
 
-    learner_state: StoixState
     episode_metrics: Dict[str, chex.Array]
     trajectories: chex.Array
     safe_q_values: chex.Array

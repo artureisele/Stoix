@@ -5,7 +5,7 @@ system_name: ff_ppo # Name of the system.
 # --- RL hyperparameters ---
 actor_lr: 3e-4 # Learning rate for actor network
 critic_lr: 1e-3 # Learning rate for critic network
-rollout_length: 100 # Number of environment steps per vectorised environment.
+rollout_length: 500 # Number of environment steps per vectorised environment.
 epochs: 80 # Number of ppo epochs per training data batch.
 num_minibatches: 1 # Number of minibatches per ppo epoch.
 gamma: 0.99 # Discounting factor.
@@ -17,4 +17,4 @@ max_grad_norm: 0.1 # Maximum norm of the gradients for a weight update.
 decay_learning_rates: False # Whether learning rates should be linearly decayed during training.
 standardize_advantages: True # Whether to standardize the advantages.
 kl_penalty_coef: 3.0 # KL penalty coefficient for PPO updates if using PPO Penalty.
-safe_num_updates_per_eval: 10
+safe_num_updates_per_eval: 5

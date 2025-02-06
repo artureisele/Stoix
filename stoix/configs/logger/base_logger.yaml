@@ -24,11 +24,11 @@ kwargs:
 checkpointing:
   save_model: True # Whether to save model checkpoints.
   save_args:
-    save_interval_steps: 1000 # Number of steps between saving checkpoints.
+    save_interval_steps: 1 # Number of steps between saving checkpoints.
     max_to_keep: 1 # Maximum number of checkpoints to keep.
     keep_period: ~ # Don't delete any checkpoint where step % keep_period == 0
     checkpoint_uid: ~ # Unique identifier for checkpoint to save. Defaults to timestamp
 
   load_model: False # Whether to load model checkpoints.
   load_args:
-    checkpoint_uid: "" # Unique identifier for checkpoint to load.
+    checkpoint_uid: "20250205132853" # Unique identifier for checkpoint to load.
