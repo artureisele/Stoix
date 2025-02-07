@@ -98,26 +98,12 @@ class WheelbotEnv():
     def _get_obs(self, model, data):
       #sensor_start_idx = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, 'acc_1')-> just use 0 for now
       sensor_start_idx = 0
-      #a_B = np.array([
-      #        self.imu_rotation_matrices['imu_1'] @ self.data.sensordata[sensor_start_idx:sensor_start_idx+3],
-      #        self.imu_rotation_matrices['imu_2'] @ self.data.sensordata[sensor_start_idx+3:sensor_start_idx+6],
-      #        self.imu_rotation_matrices['imu_3'] @ self.data.sensordata[sensor_start_idx+6:sensor_start_idx+9],
-      #        self.imu_rotation_matrices['imu_4'] @ self.data.sensordata[sensor_start_idx+9:sensor_start_idx+12]
-      #        ]).T
       a_B = jnp.array([
           data.site_xmat[0] @ data.sensordata[sensor_start_idx:sensor_start_idx+3],
           data.site_xmat[1] @ data.sensordata[sensor_start_idx+3:sensor_start_idx+6],
           data.site_xmat[2] @ data.sensordata[sensor_start_idx+6:sensor_start_idx+9],
           data.site_xmat[3] @ data.sensordata[sensor_start_idx+9:sensor_start_idx+12],
       ])    
-      """         
-        omega_B = np.array([
-            self.imu_rotation_matrices['imu_1'] @ self.data.sensordata[sensor_start_idx+12:sensor_start_idx+15],
-            self.imu_rotation_matrices['imu_2'] @ self.data.sensordata[sensor_start_idx+15:sensor_start_idx+18],
-            self.imu_rotation_matrices['imu_3'] @ self.data.sensordata[sensor_start_idx+18:sensor_start_idx+21],
-            self.imu_rotation_matrices['imu_4'] @ self.data.sensordata[sensor_start_idx+21:sensor_start_idx+24]
-        ]).T
-      """
 
       omega_B = jnp.array([
           data.site_xmat[0] @ data.sensordata[sensor_start_idx+12:sensor_start_idx+15],
@@ -137,8 +123,6 @@ class WheelbotEnv():
         return jnp.concatenate((a_B.flatten(), omega_B.flatten(), motor_angles))
       return jax.lax.cond( jnp.logical_or( jnp.logical_or((a_B==0).all() , (omega_B==0).all()),(motor_angles==0).all()),trueFun, falseFun, )#(self.estimate_states, self.estimator, self.motorestimators ))  # If all the accelerometer values are zero, repeat step
 
-
-      return obs
 
     def _check_terminated(self):
         data = self.data
@@ -164,7 +148,8 @@ class WheelbotEnv():
     def step(self,model, data, action):
         data.replace(ctrl=action)
         new_data = mjx.step(model,data)
-
+        if jnp.any(data.contact.geom1!=0) or jnp.any(data.contact.geom2!=0):
+            jax.debug.breakpoint()
         observation = self._get_obs(model, data)
         #reward, reward_info = self._get_rew(observation, action)
         #terminated = self._check_terminated()

@@ -1,5 +1,39 @@
 import numpy as np
 
+def Rx(theta):
+    """
+    Rotation matrix around x-axis.
+    """
+    return np.array([[1, 0, 0],
+                     [0, np.cos(theta), -np.sin(theta)],
+                     [0, np.sin(theta), np.cos(theta)]])
+
+def Ry(theta):
+    """
+    Rotation matrix around y-axis.
+    """
+    return np.array([[np.cos(theta), 0, np.sin(theta)],
+                     [0, 1, 0],
+                     [-np.sin(theta), 0, np.cos(theta)]])
+
+def Rz(theta):
+    """
+    Rotation matrix around z-axis.
+    """
+    return np.array([[np.cos(theta), -np.sin(theta), 0],
+                     [np.sin(theta), np.cos(theta), 0],
+                     [0, 0, 1]])
+
+
+def skew_symmetric(w):
+    """
+    Skew symmetric matrix.
+    """
+    v = w.flatten()
+    return np.array([[0, -v[2], v[1]],
+                     [v[2], 0, -v[0]],
+                     [-v[1], v[0], 0]])
+
 class Estimator:
     def __init__(self, N_IMUS=4, N_MOTORS=2):
         self.N_IMUS = N_IMUS
@@ -9,7 +43,16 @@ class Estimator:
         self.R01 = np.array([[0, -1, 0], [-1, 0, 0], [0, 0, -1]])
         self.R23 = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
         self.R_Bi = [self.R01, self.R01, self.R23, self.R23]
-        self.X1 = np.array([-0.166896, -0.167463, 0.667201, 0.667159]) # need to check this
+        # self.X1 = np.array([-0.166896, -0.167463, 0.667201, 0.667159]) # need to check this
+        r = np.array([[-0.0234, -0.0204, 0.01939],
+                        [0.0234, 0.0204, 0.01939],
+                        [-0.016427, 0.020172, -0.01889],
+                        [0.016368, -0.020481, -0.018916]]).T + np.array([[0, 0, 0.0325]]).T
+        P = np.concatenate([np.ones((1,4)), r,])
+
+        self.X = (P.T @ np.linalg.inv(P @ P.T))
+        self.X1 = self.X[:,0]
+        print("X1:", self.X1)
 
         self.pivot_accel = np.zeros(3)
         self.q_G = np.zeros(3)
@@ -48,12 +91,11 @@ class Estimator:
 
         self.ddq = self.IIRFilter((self.dq_G - self.dq) / self.dt, self.ddq, 0.1)
 
-        self.pivot_accel = self.estimate_pivot_accel(self.q, self.dq_G, self.ddq, self.dq_WR[0], self.ddq_WR[0])
-        self.pivot_accel = np.zeros(3)
+        self.pivot_accel = self.estimate_pivot_accel(self.q_G, self.dq_G, self.ddq, self.dq_WR[0], self.ddq_WR[0])
         g_B = self.calculate_g_B(a_B, self.pivot_accel, self.X1)
         self.q_A = self.estimate_accel(g_B)
 
-        alpha_scale = self.alpha
+        alpha_scale = self.alpha 
         self.q[0] = alpha_scale * self.q_A[0] + (1 - alpha_scale) * self.q_G[0]
         self.q[1] = alpha_scale * self.q_A[1] + (1 - alpha_scale) * self.q_G[1]
         self.q[2] = self.q_G[2]
@@ -102,20 +144,37 @@ class Estimator:
         temp1 = np.array([2 * c1 * self.r * dq[0] * dq[2] + self.r * s1 * ddq[2], -c1 * self.r * ddq[0] + self.r * s1 * dq[0] ** 2 + self.r * s1 * dq[2] ** 2, -c1 * self.r * dq[0] ** 2 - self.r * s1 * ddq[0]])
         ddp_WC = self.R2(q[1]).T @ self.R1(q[0]).T @ temp1
 
-        temp2 = np.array([self.r * ddq4, self.r * dq[2] * dq4, 0])
+        temp2 = np.array([self.r * (ddq4+ddq[1]), self.r * dq[2] * (dq4+dq[1]), 0])
         ddp_CI = self.R2(q[1]).T @ self.R1(q[0]).T @ temp2
 
         return ddp_WC + ddp_CI
-
+    
     def IIRFilter(self, new_value, old_value, alpha):
         return alpha * new_value + (1 - alpha) * old_value
+    
+    def reset(self):
+        self.pivot_accel = np.zeros(3)
+        self.q_G = np.zeros(3)
+        self.dq_G = np.zeros(3)
+        self.q_A = np.zeros(2)
+        self.q = np.zeros(3)
+        self.dq = np.zeros(3)
+        self.ddq = np.zeros(3)
+        self.q_WR = np.zeros(self.N_MOTORS)
+        self.dq_WR = np.zeros(self.N_MOTORS)
+        self.ddq_WR = np.zeros(self.N_MOTORS)
+
+        self.dt = 1.e-3
+        self.r = 32e-3
+        self.alpha = 0.02
+        self.init = True
 
 if __name__=="__main__":
     estimator = Estimator()
     omega_B = np.zeros((3, 4))
     a_B = np.zeros((3, 4))
-    #a_B[2,:] = 9.81*np.cos(np.pi/6)
-    #a_B[0,:] = 9.81*np.sin(np.pi/6)
+    a_B[2,:] = 9.81*np.cos(np.pi/6)
+    a_B[0,:] = 9.81*np.sin(np.pi/6)
     motor_states = np.zeros((3, 2))
     result = estimator.update(omega_B, a_B, motor_states)
     print("omega_B:", omega_B)

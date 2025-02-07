@@ -21,10 +21,10 @@ imageio.mimwrite(video_file, frames, fps=1)
 """
 mjx_model, mjx_data = a.init_mjx()
 
-broadcast = lambda x: jnp.broadcast_to(x, (100, *(x.shape)))
+broadcast = lambda x: jnp.broadcast_to(x, (3, *(x.shape)))
 mjx_model_batch = jax.tree_util.tree_map(broadcast, mjx_model)
 mjx_data_batch = jax.tree_util.tree_map(broadcast, mjx_data)
-action_batch = jnp.ones((100,2))*0.05
+action_batch = jnp.ones((3,2))*0.05
 
 def step(mjx_data_batch, _):
     mjx_data_batch, obs_batch, info = jax.vmap(a.step, in_axes=(0,0,0))(mjx_model_batch, mjx_data_batch, action_batch)
@@ -34,7 +34,7 @@ def rollout(mjx_data_batch):
         step, mjx_data_batch, None, 100
     )
     return obs_batch_traj
-result = jax.jit(rollout)(mjx_data_batch)
+result = rollout(mjx_data_batch)
 print(result)
 
 #print(frames)

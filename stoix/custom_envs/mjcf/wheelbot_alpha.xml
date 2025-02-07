@@ -34,13 +34,13 @@
     <camera name="balancing_view" pos="0.000 -0.545 0.545" xyaxes="1.000 -0.000 0.000 0.000 0.707 0.707" mode="fixed"/>
 
     <!-- Wall 1: North -->
-    <geom name="wall_north" type="box" pos="0 1 0.25" size="1.05 0.05 0.25" rgba="0 0 1 1" friction="1 0.1 0.1"/>
+    <geom name="wall_north" type="box" pos="0 1 0.15" size="1.05 0.05 0.15" rgba="0.5 0.5 0.5 1" friction="1 0.1 0.1"/>
     <!-- Wall 2: South -->
-    <geom name="wall_south" type="box" pos="0 -1 0.25" size="1.05 0.05 0.25" rgba="0 1 0 1" friction="1 0.1 0.1"/>
+    <geom name="wall_south" type="box" pos="0 -1 0.15" size="1.05 0.05 0.15" rgba="0.5 0.5 0.5 1" friction="1 0.1 0.1"/>
     <!-- Wall 3: East -->
-    <geom name="wall_east" type="box" pos="1 0 0.25" size="0.05 0.95 0.25" rgba="1 0 0 1" friction="1 0.1 0.1"/>
+    <geom name="wall_east" type="box" pos="1 0 0.15" size="0.05 0.95 0.15" rgba="0.5 0.5 0.5 1" friction="1 0.1 0.1"/>
     <!-- Wall 4: West -->
-    <geom name="wall_west" type="box" pos="-1 0 0.25" size="0.05 0.95 0.25" rgba="0 0 0 1" friction="1 0.1 0.1"/>
+    <geom name="wall_west" type="box" pos="-1 0 0.15" size="0.05 0.95 0.15" rgba="0.5 0.5 0.5 1" friction="1 0.1 0.1"/>
   </worldbody>
   <actuator>
     <motor name="motor_1" joint="w1" gear="1" ctrlrange="-0.5 0.5"/>
