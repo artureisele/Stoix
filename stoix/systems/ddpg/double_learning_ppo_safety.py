@@ -722,7 +722,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         pickle.dump(maximal_actions_taken_performance, file)
     with open("experienced_actions_safe.pkl", "wb") as file:
         pickle.dump(maximal_actions_taken_safety, file)
-    uploadVideos()#f"AblationBonusDoubleLearningJaxCartpole_Bonus{bonus},_{i}_Videos")
+   #uploadVideos()#f"AblationBonusDoubleLearningJaxCartpole_Bonus{bonus},_{i}_Videos")
     logger.stop()
     return eval_step_safety
 
