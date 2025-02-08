@@ -1,6 +1,6 @@
 from stoix.custom_envs.cartpole_hyperplane import CartPole as CartPoleSafe
 from stoix.custom_envs.cartpole_performance import CartPole as CartPolePerf
-from stoix.custom_envs.wheelbot import Wheelbot
+from stoix.custom_envs.wheelbot_test_mjx import WheelbotEnv as Wheelbot
 
 registered_envs = ["CartPoleHyperplane", "CartPolePerformance", "Wheelbot-v0"]
 def make(env_id: str, **env_kwargs):
