@@ -125,8 +125,23 @@ class WheelbotEnv():
 
 
     def _check_terminated(self):
+        #For wheelbot_alpha
+        #data.contact.geom1
+        # 0 -> ground, 1->wall_north, 2->wall_south, 3-> wall_east, 4-> wall_west
+        #5-> body_geom, 6->wheel_1_geom, 7->wheel_2_geom
+        #5+0-> fall = True
+        #6+0 -> wheel_contact = True
         data = self.data
         model = self.model
+        fall = jnp.any(jnp.logical_or(
+            jnp.logical_and(data.contact.geom1 == 5, data.contact.geom2 == 0),
+            jnp.logical_and(data.contact.geom1 == 0, data.contact.geom2 == 5)
+        ))
+        wheel_contact = jnp.any(jnp.logical_or(
+            jnp.logical_and(data.contact.geom1 == 6, data.contact.geom2 == 0),
+            jnp.logical_and(data.contact.geom1 == 0, data.contact.geom2 == 6)
+        ))
+        jax.debug.print("{},{}",fall,wheel_contact)
         fall = False
         wheel_contact = False
         for i in range(data.ncon):
@@ -148,8 +163,15 @@ class WheelbotEnv():
     def step(self,model, data, action):
         data.replace(ctrl=action)
         new_data = mjx.step(model,data)
-        if jnp.any(data.contact.geom1!=0) or jnp.any(data.contact.geom2!=0):
-            jax.debug.breakpoint()
+        fall = jnp.any(jnp.logical_or(
+            jnp.logical_and(data.contact.geom1 == 5, data.contact.geom2 == 0),
+            jnp.logical_and(data.contact.geom1 == 0, data.contact.geom2 == 5)
+        ))
+        wheel_contact = jnp.any(jnp.logical_or(
+            jnp.logical_and(data.contact.geom1 == 6, data.contact.geom2 == 0),
+            jnp.logical_and(data.contact.geom1 == 0, data.contact.geom2 == 6)
+        ))
+        jax.debug.print("{},{}",fall,wheel_contact)
         observation = self._get_obs(model, data)
         #reward, reward_info = self._get_rew(observation, action)
         #terminated = self._check_terminated()
