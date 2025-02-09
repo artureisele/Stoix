@@ -14,7 +14,7 @@ DEFAULT_CAMERA_CONFIG = {
     "elevation": -90.0,
 }
 
-DEFAULT_SIZE = 480
+DEFAULT_SIZE = 1600
 class WheelbotEnv():
     def __init__(
         self,

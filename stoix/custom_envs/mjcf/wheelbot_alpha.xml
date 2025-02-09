@@ -29,6 +29,25 @@
         <geom name="wheel_2_geom" type="mesh" mesh="wheel"/>
       </body>
     </body>
+    <body name ="body2" pos="0.5 0.5 .0645" euler="0 0 0">
+      <inertial pos="0 0 0" mass="0.312" diaginertia="220e-6 190e-6 300e-6"/> 
+      <site name = "imu_12" pos = "-0.0234 -0.0204 0.01939" euler="180 0 90" type="box" size="0.0045 0.003 0.00095"/>
+      <site name = "imu_22" pos = "0.0234 0.0204 0.01939" euler="180 0 90" type="box" size="0.0045 0.003 0.00095"/>
+      <site name = "imu_32" pos = "-0.016427 0.020172 -0.01889" euler="0 0 90" type="box" size="0.0045 0.003 0.00095"/>
+      <site name = "imu_42" pos = "0.016368 -0.020481 -0.018916" euler="0 0 90" type="box" size="0.0045 0.003 0.00095"/>
+      <joint type="free"/>
+      <geom name="body_geom2" type="mesh" mesh="body"/>
+      <body name ="wheel12" pos="0 0 -0.0325" euler="0 0 -90">
+        <inertial pos="0 0 0" mass="0.129" diaginertia="100e-6 53e-6 53e-6"/> 
+        <joint name="w12" type="hinge" pos="0 0 0" axis="-1 0 0" damping="0.001"/>
+        <geom name="wheel_1_geom2" type="mesh" mesh="wheel"/>
+      </body>
+      <body name ="wheel22" pos="0 0 0.0325" euler="0 0 0">
+        <inertial pos="0 0 0" mass="0.129" diaginertia="100e-6 53e-6 53e-6"/> 
+        <joint name="w22" type="hinge" pos="0 0 0" axis="1 0 0" damping="0.0001"/>
+        <geom name="wheel_2_geom2" type="mesh" mesh="wheel"/>
+      </body>
+    </body>
     <!-- Overhead Camera-->
     <camera name="overhead" pos="0 0 3" quat="1 0 0 0" mode="fixed"/>
     <camera name="balancing_view" pos="0.000 -0.545 0.545" xyaxes="1.000 -0.000 0.000 0.000 0.707 0.707" mode="fixed"/>

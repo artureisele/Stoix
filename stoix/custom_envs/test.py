@@ -13,12 +13,10 @@ trajectory = [mjx_data]
 for i in range(100):
     new_data, observation, info = a.step(mjx_model, new_data, jnp.array([0.1,0.1]))
     trajectory.append(new_data)
-    print(observation)
-    print(info)
-frames = a.render(a.model, trajectory)
+frames = a.render(a.model, trajectory, camera="balancing_view")
 video_file = "jax.mp4"
 print(f"Video saved to {video_file}")
-imageio.mimwrite(video_file, frames, fps=1)
+imageio.mimwrite(video_file, frames, fps=30)
 
 
 """
