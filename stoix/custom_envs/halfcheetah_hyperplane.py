@@ -111,7 +111,7 @@ class HalfcheetahHyperplaneWrapper(BraxWrapper):
         key1, key2 = jax.random.split(state.key)
         action_proposal = jax.random.uniform(key1, (6), minval=-1.0, maxval=1.0)
         action_proposal_freedom = jax.random.uniform(key2, (6,100), minval=-1.0, maxval=1.0)
-        #filter_factor = (jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.9]))-0.9)
+        #filter_factor = (jnp.max(jnp.array([jnp.sum(jnp.dot(a_h, action_proposal_freedom) < b_h) /100,0.6]))-0.6)
         filter_factor = 0
         def proj_fn(inp):
             a,a_h,b_h = inp

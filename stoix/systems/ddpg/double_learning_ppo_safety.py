@@ -382,7 +382,7 @@ def plot_starting_states(starting_states, perf_evaluator_output):
     #wandb.log({"test":img})
     perf_evaluator_output.episode_metrics["Safety_Training_Starting_States"] = img
 
-def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
+def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index) -> float:
     """Runs experiment."""
     print("Initialize the config dicts!")
     config_s,config_p, key = initialize_config_dicts(_config_s,_config_p)
@@ -716,11 +716,11 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig) -> float:
         perf_learner_state = perf_learner_output.learner_state
     # Stop the logger.
     #Safe the trajectories for later videos
-    with open("experienced_trajectories.pkl", "wb") as file:
+    with open(f"experienced_trajectories_0.4Eval200-Run{iteration_index}.pkl", "wb") as file:
         pickle.dump(maximal_trajectories, file)
-    with open("experienced_actions_perf.pkl", "wb") as file:
+    with open(f"experienced_actions_perf_0.4Eval200-Run{iteration_index}.pkl", "wb") as file:
         pickle.dump(maximal_actions_taken_performance, file)
-    with open("experienced_actions_safe.pkl", "wb") as file:
+    with open(f"experienced_actions_safe_0.4Eval200-Run{iteration_index}.pkl", "wb") as file:
         pickle.dump(maximal_actions_taken_safety, file)
    #uploadVideos()#f"AblationBonusDoubleLearningJaxCartpole_Bonus{bonus},_{i}_Videos")
     logger.stop()
@@ -736,40 +736,33 @@ def hydra_entry_point(cfg: DictConfig) -> float:
     """Experiment entry point."""
     # Allow dynamic attributes.
     OmegaConf.set_struct(cfg, False)
-    for j in range(10):
-        for i in range(1,6):
-            if j <= 5 or j>6:
-                continue
-            
-            bonus = [0.1,0.3,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.8][j]
-            cfg_performance = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
-            cfg_safety = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
-            cfg_performance.arch.seed = cfg_safety.arch.seed + (i+2) * 36
-            cfg_safety.arch.seed = cfg_safety.arch.seed + (i+2) * 36
-            
-            cfg_performance.system = list(cfg_safety.system.items())[1][1]
-            cfg_safety.system = list(cfg_safety.system.items())[0][1]
+    for i in range(1,5):
+        cfg_performance = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
+        cfg_safety = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
+        cfg_performance.arch.seed = cfg_safety.arch.seed + (i+2) * 31
+        cfg_safety.arch.seed = cfg_safety.arch.seed + (i+2) * 31
+        
+        cfg_performance.system = list(cfg_safety.system.items())[1][1]
+        cfg_safety.system = list(cfg_safety.system.items())[0][1]
 
-            cfg_performance.network = list(cfg_safety.network.items())[1][1]
-            cfg_safety.network = list(cfg_safety.network.items())[0][1]
+        cfg_performance.network = list(cfg_safety.network.items())[1][1]
+        cfg_safety.network = list(cfg_safety.network.items())[0][1]
 
-            #print(list(cfg_safety.env.items()))
-            cfg_performance.env = list(cfg_safety.env.items())[1][1]
-            cfg_safety.env = list(cfg_safety.env.items())[0][1]
+        #print(list(cfg_safety.env.items()))
+        cfg_performance.env = list(cfg_safety.env.items())[1][1]
+        cfg_safety.env = list(cfg_safety.env.items())[0][1]
 
-            #print("CFG Safety")
-            #print(cfg_safety)
-            #print("CFG Perf")
-            #print(cfg_performance)
-            # Run experiment.
-            #jax.debug.breakpoint()
-            #cfg_safety.env.kwargs.bonus = bonus
-            cfg_safety.logger.kwargs.name =f"HalfcheetahTest{i}"
-            eval_performance = run_experiment(cfg_safety, cfg_performance)
-            print(f"It took {eval_performance} Iterations to learn safety")
-            print(f"{Fore.CYAN}{Style.BRIGHT}Double Learning experiment completed{Style.RESET_ALL}")
-
-
+        #print("CFG Safety")
+        #print(cfg_safety)
+        #print("CFG Perf")
+        #print(cfg_performance)
+        # Run experiment.
+        #jax.debug.breakpoint()
+        #cfg_safety.env.kwargs.bonus = bonus
+        cfg_safety.logger.kwargs.name =f"HalfcheetahJaxFilter0.4Eval200-Run{i}"
+        eval_performance = run_experiment(cfg_safety, cfg_performance,i)
+        print(f"It took {eval_performance} Iterations to learn safety")
+        print(f"{Fore.CYAN}{Style.BRIGHT}Double Learning experiment completed{Style.RESET_ALL}")
     return eval_performance
 
 
