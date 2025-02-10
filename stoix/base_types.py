@@ -100,7 +100,14 @@ class MistakeEvalState(NamedTuple):
     action_taken_performance: chex.Array
     action_taken_safety: chex.Array
     filter_factor: chex.Array
-
+class MistakeEvalStateReducedForSafety(NamedTuple):
+    """State of the performance evaluator in double learning."""
+    key: chex.PRNGKey
+    env_state: State
+    timestep: TimeStep
+    step_count: chex.Array
+    episode_return: chex.Array
+    trajectory: BraxState
 
 
 class RNNEvalState(NamedTuple):
@@ -220,6 +227,11 @@ class EvaluationOutputTrajectory(NamedTuple, Generic[StoixState]):
     action_taken_performance: chex.Array
     action_taken_safety: chex.Array
     filter_factor: chex.Array
+
+class EvaluationOutputTrajectoryReducedSafety(NamedTuple, Generic[StoixState]):
+    """Evaluation output."""
+    episode_metrics: Dict[str, chex.Array]
+    trajectories: chex.Array
 
 RNNObservation: TypeAlias = Tuple[Observation, Done]
 LearnerFn = Callable[[StoixState], AnakinExperimentOutput[StoixState]]

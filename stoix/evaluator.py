@@ -24,6 +24,8 @@ from stoix.base_types import (
     EvaluationOutput,
     EvaluationOutputTrajectory,
     MistakeEvalState,
+    MistakeEvalStateReducedForSafety,
+    EvaluationOutputTrajectoryReducedSafety,
     RecActFn,
     RecActorApply,
     RNNEvalState,
@@ -207,6 +209,129 @@ def get_ff_evaluator_fn_track_failed_trajectories(
             action_taken_performance = action_taken_performance,
             action_taken_safety = action_taken_safety,
             filter_factor = filter_factor,
+        )
+
+    return evaluator_fn
+
+def get_ff_evaluator_fn_track_failed_trajectories_safety_initial_eval(
+    env: Environment,
+    act_fn: ActFn,
+    config: DictConfig,
+    log_solve_rate: bool = False,
+    eval_multiplier: int = 1,
+    observation_shape = ()
+) -> EvalFn:
+    """Get the evaluator function for feedforward networks. Additionally return Replay Buffer with failed(not truncated) trajectories.
+    Args:
+        env (Environment): An environment instance for evaluation.
+        act_fn (callable): The act_fn that returns the action taken by the agent.
+        config (dict): Experiment configuration.
+        eval_multiplier (int): A scalar that will increase the number of evaluation
+            episodes by a fixed factor. The reason for the increase is to enable the
+            computation of the `absolute metric` which is a metric computed and the end
+            of training by rolling out the policy which obtained the greatest evaluation
+            performance during training for 10 times more episodes than were used at a
+            single evaluation step.
+    """
+    def eval_one_episode(params: FrozenDict, init_eval_mistake_state: MistakeEvalStateReducedForSafety) -> Dict:
+        """Evaluate one episode. It is vectorized over the number of evaluation episodes."""
+
+        empty_trajectory = init_eval_mistake_state.trajectory
+
+        def _env_step(mistake_eval_state: MistakeEvalStateReducedForSafety) -> MistakeEvalStateReducedForSafety:
+            """Step the environment."""
+            # PRNG keys.
+            key, last_env_state, last_timestep, step_count, episode_return, trajectory= mistake_eval_state
+
+            # Select action.
+            key, policy_key = jax.random.split(key)
+            
+            #Probably new axis here, because actor works only on batched obs
+            action = act_fn(
+                params,
+                jax.tree_util.tree_map(lambda x: x[jnp.newaxis, ...], last_timestep.observation),
+                policy_key,
+            )
+
+            # Step environment.
+            env_state, timestep = env.step(last_env_state, action.squeeze())
+
+            # Log episode metrics.
+            episode_return += timestep.reward
+            step_count += 1
+            def update_tree(container, idx, new_subtree):
+                def update_leaf(old, new):
+                    # old has shape (batch, ...) and new has shape (1, ...)
+                    return old.at[idx].set(new)
+                return jax.tree.map(update_leaf, container, new_subtree)
+
+            mistake_eval_state = MistakeEvalStateReducedForSafety(
+                key,
+                env_state,
+                timestep,
+                step_count,
+                episode_return,
+                trajectory=update_tree(trajectory,step_count-1,last_env_state),
+                
+            )
+            return mistake_eval_state
+
+        def not_done(carry: MistakeEvalStateReducedForSafety) -> bool:
+            """Check if the episode is done."""
+            timestep = carry[2]
+            is_not_done: bool = ~timestep.last()
+            return is_not_done
+        final_state = jax.lax.while_loop(not_done, _env_step, init_eval_mistake_state)
+        #TODO Check that this really handles the truncation case. Super Imptortant
+        eval_metrics = {
+            "episode_return": final_state.episode_return,
+          
+            "episode_length": final_state.step_count,
+        }
+        # Log solve episode if solve rate is required.
+        if log_solve_rate:
+            eval_metrics["solve_episode"] = jnp.all(
+                final_state.episode_return >= config.env.solved_return_threshold
+            ).astype(int)
+        complete_trajectory = final_state.trajectory
+        #Trajectory is != 0 only if it failed, complete_trajectory returns the trajectory independent of failure
+        return eval_metrics, complete_trajectory
+
+    def evaluator_fn(trained_params: FrozenDict, key: chex.PRNGKey) -> EvaluationOutputTrajectoryReducedSafety[EvalState]:
+        """Evaluator function."""
+
+        # Initialise environment states and timesteps.
+        n_devices = len(jax.devices())
+
+        eval_batch = (config.arch.num_eval_episodes // n_devices) * eval_multiplier
+
+        key, *env_keys = jax.random.split(key, eval_batch + 1)
+        env_states, timesteps = jax.vmap(env.reset)(
+            jnp.stack(env_keys),
+        )
+        # Split keys for each core.
+        key, *step_keys = jax.random.split(key, eval_batch + 1)
+        # Add dimension to pmap over.
+        step_keys = jnp.stack(step_keys).reshape(eval_batch, -1)
+
+        mistake_eval_state = MistakeEvalStateReducedForSafety(
+            key=step_keys,
+            env_state=env_states,
+            timestep=timesteps,
+            step_count=jnp.zeros((eval_batch, 1), dtype=jnp.int32),
+            episode_return=jnp.zeros_like(timesteps.reward),
+            trajectory=env.zero_batch_brax_state(), #complex pytreee eval_batch x return_threshold x ...
+        )
+        eval_metrics, complete_trajectories= jax.vmap(
+            eval_one_episode,
+            in_axes=(None, 0),
+            out_axes=(0,0),
+            axis_name="eval_batch",
+        )(trained_params, mistake_eval_state)
+
+        return EvaluationOutputTrajectoryReducedSafety(
+            episode_metrics=eval_metrics,
+            trajectories=complete_trajectories,
         )
 
     return evaluator_fn
@@ -492,6 +617,7 @@ def evaluator_setup(
     config: DictConfig,
     use_recurrent_net: bool = False,
     track_failed_trajectories: bool = False,
+    safety_initial_eval: bool = False,
     scanned_rnn: Optional[nn.Module] = None,
 ) -> Tuple[EvalFn, EvalFn, Tuple[FrozenDict, chex.Array]]:
     """Initialise evaluator_fn."""
@@ -525,17 +651,30 @@ def evaluator_setup(
         # Create replay buffer
 
         if track_failed_trajectories:
-            evaluator = get_ff_evaluator_fn_track_failed_trajectories(
-                eval_env, eval_act_fn, config, log_solve_rate,observation_shape= observation_shape  # type: ignore
-            )
-            absolute_metric_evaluator = get_ff_evaluator_fn_track_failed_trajectories(
-                eval_env,
-                eval_act_fn,  # type: ignore
-                config,
-                log_solve_rate,
-                10,
-                observation_shape=observation_shape
-            )
+            if not safety_initial_eval:
+                evaluator = get_ff_evaluator_fn_track_failed_trajectories(
+                    eval_env, eval_act_fn, config, log_solve_rate,observation_shape= observation_shape  # type: ignore
+                )
+                absolute_metric_evaluator = get_ff_evaluator_fn_track_failed_trajectories(
+                    eval_env,
+                    eval_act_fn,  # type: ignore
+                    config,
+                    log_solve_rate,
+                    10,
+                    observation_shape=observation_shape
+                )
+            else:
+                evaluator = get_ff_evaluator_fn_track_failed_trajectories_safety_initial_eval(
+                    eval_env, eval_act_fn, config, log_solve_rate,observation_shape= observation_shape  # type: ignore
+                )
+                absolute_metric_evaluator = get_ff_evaluator_fn_track_failed_trajectories_safety_initial_eval(
+                    eval_env,
+                    eval_act_fn,  # type: ignore
+                    config,
+                    log_solve_rate,
+                    10,
+                    observation_shape=observation_shape
+                )
         else:
             evaluator = get_ff_evaluator_fn(
                 eval_env, eval_act_fn, config, log_solve_rate  # type: ignore

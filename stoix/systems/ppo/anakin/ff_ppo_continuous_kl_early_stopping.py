@@ -13,7 +13,7 @@ from flax.core.frozen_dict import FrozenDict
 from jumanji.env import Environment
 from omegaconf import DictConfig, OmegaConf
 from rich.pretty import pprint
-
+import jax.random as random
 from stoix.base_types import (
     ActorApply,
     ActorCriticOptStates,
@@ -80,10 +80,16 @@ def get_learner_fn(
             """Step the environment."""
             params, opt_states, key, env_state, last_timestep = learner_state
             # SELECT ACTION
-            key, policy_key = jax.random.split(key)
+            key, policy_key, random_key ,random_key_2= jax.random.split(key,4)
+
             actor_policy = actor_apply_fn(params.actor_params, last_timestep.observation)
             value = critic_apply_fn(params.critic_params, last_timestep.observation)
-            action = actor_policy.sample(seed=policy_key)
+
+            action_policy = actor_policy.sample(seed=policy_key)
+            random_action = random.uniform(random_key, shape=action_policy.shape, minval=-1.0, maxval=1.0)
+            eps_prob = random.uniform(random_key_2, shape=(), minval=0, maxval=1)
+            #Epsilon greedy policy to enforce strict exploration
+            action = jax.lax.cond(eps_prob>=0.1, lambda: action_policy, lambda: random_action)
             log_prob = actor_policy.log_prob(action)
 
             # STEP ENVIRONMENT

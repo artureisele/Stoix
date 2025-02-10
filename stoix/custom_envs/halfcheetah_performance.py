@@ -57,7 +57,7 @@ class HalfcheetahPerfWrapper(BraxWrapper):
 
     def zero_batch_brax_state(self):
         episode_length = 500
-        eval_epsisodes = 20
+        eval_epsisodes = 200
         """" Thats for spring
         return BraxState(
             pipeline_state=StateSpring(
