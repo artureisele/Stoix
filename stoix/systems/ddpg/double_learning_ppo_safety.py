@@ -130,7 +130,6 @@ def generate_safety_env_and_learn(config_s, key, custom_extras):
         key_e=safe_key_e,
         eval_act_fn=get_distribution_act_fn(config_s, safe_actor_network.apply),
         params=safe_learner_state.params.actor_params,
-        track_failed_trajectories=True,
         config=config_s,
     )
     return key, safe_learn, safe_actor_network, safe_q_network, safe_learner_state, safe_evaluator
@@ -394,7 +393,7 @@ def index_tree_2(container, idx1, idx2):
     return jax.tree.map(index_leaf_2, container)
 def flatten_tree(container):
     def flatten_leaf(old):
-        return old.reshape(-1)
+        return old.reshape(old.shape[0]*old.shape[1],*old.shape[2:])
     return jax.tree.map(flatten_leaf, container)
 def merge_tree(container1, container2):
     def merge_leaf(leaf1, leaf2):
@@ -459,23 +458,33 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
             print(f"Start safety evaluation for eval_step: {eval_step_safety}")
             safe_evaluator_output = safe_evaluator(safe_trained_params, eval_keys)
             jax.block_until_ready(safe_evaluator_output)
+            """
             all_trajectories = safe_evaluator_output.trajectories
             all_trajectories_flat = index_tree(all_trajectories,0)
+            final_mistake_trajectories_starts = index_tree(all_trajectories_flat, safe_evaluator_output.episode_metrics["episode_length"][0,:,0]<50)
+            all_trajectories_obs = all_trajectories_flat.obs[safe_evaluator_output.episode_metrics["episode_length"][0,:,0]<50]
+            all_trajectories_obs_reshaped = all_trajectories_obs.reshape(-1,17)
+            indices_starts = jnp.any(all_trajectories_obs_reshaped!=0,axis=1)
+            final_mistake_trajectories_starts = flatten_tree(final_mistake_trajectories_starts)
+            final_mistake_trajectories_starts = index_tree(final_mistake_trajectories_starts, indices_starts)
+
             relevant_ep_lengths = safe_evaluator_output.episode_metrics["episode_length"][0,:,0][ safe_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
             final_mistake_trajectories = index_tree(all_trajectories_flat, safe_evaluator_output.episode_metrics["episode_length"][0,:,0]<500)
             minimal_end_index = jnp.clip(jnp.min((relevant_ep_lengths-40)),a_min=1)
             random_row_indices = jax.random.choice(key, final_mistake_trajectories.obs.shape[0], shape=(minimal_end_index,), replace=True)
             final_mistake_trajectories_way = index_tree_2(final_mistake_trajectories,random_row_indices, jnp.arange(minimal_end_index))
-            final_mistake_trajectories_ends = index_tree_2(final_mistake_trajectories, jnp.arange(final_mistake_trajectories.obs.shape[0]),jnp.clip((relevant_ep_lengths-40),a_min=0).astype(int))
-            final_mistake_trajectories = merge_tree(final_mistake_trajectories_way, final_mistake_trajectories_ends)
+            #final_mistake_trajectories_ends = index_tree_2(final_mistake_trajectories, jnp.arange(final_mistake_trajectories.obs.shape[0]),jnp.clip((relevant_ep_lengths-1),a_min=0).astype(int))
+            final_mistake_trajectories = merge_tree(final_mistake_trajectories_way, final_mistake_trajectories_starts)
             print(f"Length potential starting mistake states{len(final_mistake_trajectories.obs)}")
             plot_starting_states(final_mistake_trajectories, safe_evaluator_output)
             starting_states = final_mistake_trajectories
-
+            """
             # Log the results of the evaluation.
             elapsed_time = time.time() - start_time
             episode_return = log_evaluation_metrics_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, safe_evaluator_output,logger)
             print(f"Episode Length mean of evaluation: {safe_evaluator_output.episode_metrics['episode_length'].mean()}")
+            print(f"Episode Length min of evaluation: {safe_evaluator_output.episode_metrics['episode_length'].min()}")
+            print(f"Episode Length max of evaluation: {safe_evaluator_output.episode_metrics['episode_length'].max()}")
 
             # Terminate if environment is safety filtered
             if safe_evaluator_output.episode_metrics["episode_length"].mean() >= config_s.env.solved_return_threshold:
@@ -484,7 +493,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
             eval_step_safety +=1
             # Update runner state to continue training.
             safe_learner_state = safe_learner_output.learner_state
-
+            """
             key,safe_actor_net_key,safe_q_net_key, safe_key_e=jax.random.split(key, num=4)
             # Create the environments for train and eval for Safety Agent.
             safe_env, _ = environments.make(config=config_s, custom_extras={"mistake_trajectories":starting_states})
@@ -493,6 +502,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
             safe_learn, safe_actor_network,safe_q_network, _ = learner_setup_s(
                 safe_env, (key, safe_actor_net_key, safe_q_net_key), config_s
             )
+            """
             # Set up checkpointer
         save_checkpoint = config_s.logger.checkpointing.save_model
         if save_checkpoint:
@@ -515,7 +525,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
     start_time = time.time()
     perf_learner_output = perf_learn(perf_learner_state)
     jax.block_until_ready(perf_learner_output)
-
+    print("Episode Mean Length initial exploration: ", perf_learner_output.episode_metrics['episode_length'].mean())
     #Return to original values, high rollout length and epochs with just one update step to first gather safe experience and then learn from all of it
     config_p.system.rollout_length = _config_p.system.rollout_length
     config_p.system.epochs = _config_p.system.epochs
@@ -565,8 +575,8 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
                 all_filter_factors = perf_evaluator_output.filter_factor[0]
                 max_filter_indices = jnp.argmax(all_filter_factors, axis=1)
                 #exploration_starting_states = all_trajectories[jnp.arange(all_trajectories.shape[0]), max_filter_indices]
-                random_rows_indices = jax.random.choice(key, all_trajectories_flat.obs.shape[0], shape=(300,), replace=True)
-                column_index = jnp.arange(all_trajectories_flat.obs.shape[1]-200)
+                random_rows_indices = jax.random.choice(key, all_trajectories_flat.obs.shape[0], shape=(100,), replace=True)
+                column_index = jnp.arange(all_trajectories_flat.obs.shape[1]-400)
                 #jax.debug.breakpoint()
                 exploration_starting_states = index_tree_2(all_trajectories_flat,random_rows_indices.astype(int), column_index.astype(int))
                 #exploration_starting_states = flatten_tree(exploration_starting_states)
@@ -576,10 +586,10 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
                 safety_assured_counter = 0
                 relevant_ep_lengths = perf_evaluator_output.episode_metrics["episode_length"][0,:,0][ perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500]
                 final_mistake_trajectories = index_tree(all_trajectories_flat, perf_evaluator_output.episode_metrics["episode_length"][0,:,0]<500)
-                minimal_end_index = jnp.clip(jnp.min((relevant_ep_lengths-40)),a_min=1)
+                minimal_end_index = jnp.clip(jnp.min((relevant_ep_lengths-50)),a_min=1)
                 random_row_indices = jax.random.choice(key, final_mistake_trajectories.obs.shape[0], shape=(minimal_end_index,), replace=True)
                 final_mistake_trajectories_way = index_tree_2(final_mistake_trajectories,random_row_indices, jnp.arange(minimal_end_index))
-                final_mistake_trajectories_ends = index_tree_2(final_mistake_trajectories, jnp.arange(final_mistake_trajectories.obs.shape[0]),jnp.clip((relevant_ep_lengths-40),a_min=0).astype(int))
+                final_mistake_trajectories_ends = index_tree_2(final_mistake_trajectories, jnp.arange(final_mistake_trajectories.obs.shape[0]),jnp.clip((relevant_ep_lengths-50),a_min=0).astype(int))
 
                 #final_mistake_trajectories_starts = final_mistake_trajectories[jnp.arange(final_mistake_trajectories.shape[0]),jnp.clip((relevant_ep_lengths-10000),a_min=0).astype(int)]
                 #if len(final_mistake_trajectories_starts) >10:
@@ -592,10 +602,11 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
                 #final_mistake_trajectories_way = flatten_tree(final_mistake_trajectories_way)
                 #final_mistake_trajectories_ends = flatten_tree(final_mistake_trajectories_ends)
 
-                final_mistake_trajectories = merge_tree(final_mistake_trajectories_way, final_mistake_trajectories_ends)
+                #final_mistake_trajectories = merge_tree(final_mistake_trajectories_way, final_mistake_trajectories_ends)
+                final_mistake_trajectories = final_mistake_trajectories_ends
                 #safe_q_values_relevant = safe_q_values_relevant[indices].reshape(-1)
                 print(f"Length potential starting mistake states{len(final_mistake_trajectories.obs)}")
-
+                print(f"Minimal Length Episode: {perf_evaluator_output.episode_metrics['episode_length'][0,:,0].min()}")
                 #if len(final_mistake_trajectories)!=0:
                     #def softmax(x):
                         #exp_x = jnp.exp(x - jnp.max(x))  # Subtract max for numerical stability
@@ -614,7 +625,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
             perf_eval_length = log_evaluation_metrics_performance_agent_for_safety_training(config_s,config_p, elapsed_time, eval_step_safety,eval_step_perf, perf_evaluator_output,logger)
             print(f"Performance eval length: {perf_eval_length}")
             print(f"Safety_assured_counter: {safety_assured_counter}")
-            if safety_assured_counter >= 2:
+            if safety_assured_counter >= 1:
                 break
 
 
@@ -701,11 +712,11 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
         perf_learner_state = perf_learner_output.learner_state
     # Stop the logger.
     #Safe the trajectories for later videos
-    with open(f"experienced_trajectories_0.4Eval200-Run{iteration_index}.pkl", "wb") as file:
+    with open(f"DetStartingStates_0.6Eval200-Run{iteration_index}.pkl", "wb") as file:
         pickle.dump(maximal_trajectories, file)
-    with open(f"experienced_actions_perf_0.4Eval200-Run{iteration_index}.pkl", "wb") as file:
+    with open(f"DetStartingStates_0.6Eval200-Run{iteration_index}.pkl", "wb") as file:
         pickle.dump(maximal_actions_taken_performance, file)
-    with open(f"experienced_actions_safe_0.4Eval200-Run{iteration_index}.pkl", "wb") as file:
+    with open(f"DetStartingStates_0.6Eval200-Run{iteration_index}.pkl", "wb") as file:
         pickle.dump(maximal_actions_taken_safety, file)
    #uploadVideos()#f"AblationBonusDoubleLearningJaxCartpole_Bonus{bonus},_{i}_Videos")
     logger.stop()
@@ -744,7 +755,7 @@ def hydra_entry_point(cfg: DictConfig) -> float:
         # Run experiment.
         #jax.debug.breakpoint()
         #cfg_safety.env.kwargs.bonus = bonus
-        cfg_safety.logger.kwargs.name =f"HalfcheetahJaxFilter0.4Eval200-Run{i}"
+        cfg_safety.logger.kwargs.name =f"DetStartingStates_0.6Eval200-Run{i}"
         eval_performance = run_experiment(cfg_safety, cfg_performance,i)
         print(f"It took {eval_performance} Iterations to learn safety")
         print(f"{Fore.CYAN}{Style.BRIGHT}Double Learning experiment completed{Style.RESET_ALL}")

@@ -187,7 +187,8 @@ class HalfcheetahHyperplaneWrapper(BraxWrapper):
         # This is true if truncated or done
         #terminated = state.done.astype(jnp.bool_)
         terminated = jax.lax.cond(jnp.logical_or(state.obs[0]< -0.3,truncated), lambda: True, lambda: False)
-        reward_hyp = (1-101*terminated-filter_factor).astype(float)     
+        terminated_not_truncated = jax.lax.cond(state.obs[0]< -0.3, lambda: True, lambda: False)
+        reward_hyp = (1-101*terminated_not_truncated-filter_factor).astype(float)     
         state = BraxState(
             pipeline_state=state.pipeline_state,
             obs=state.obs,

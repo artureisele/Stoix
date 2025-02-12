@@ -75,9 +75,10 @@ def get_warmup_fn(
             done = timestep.last().reshape(-1)
             info = timestep.extras["episode_metrics"]
             next_obs = timestep.extras["next_obs"]
+            done_not_truncated = jnp.logical_and(done, timestep.discount==0.0)
 
             transition = Transition(
-                last_timestep.observation, action, timestep.reward, done, next_obs, info
+                last_timestep.observation, action, timestep.reward, done_not_truncated, next_obs, info
             )
 
             return (env_state, timestep, key), transition
@@ -135,9 +136,9 @@ def get_learner_fn(
             done = timestep.last().reshape(-1)
             info = timestep.extras["episode_metrics"]
             next_obs = timestep.extras["next_obs"]
-
+            done_not_truncated = jnp.logical_and(done, timestep.discount==0.0)
             transition = Transition(
-                last_timestep.observation, action, timestep.reward, done, next_obs, info
+                last_timestep.observation, action, timestep.reward, done_not_truncated, next_obs, info
             )
 
             learner_state = OffPolicyLearnerState(

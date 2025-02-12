@@ -89,7 +89,7 @@ def get_learner_fn(
             random_action = random.uniform(random_key, shape=action_policy.shape, minval=-1.0, maxval=1.0)
             eps_prob = random.uniform(random_key_2, shape=(), minval=0, maxval=1)
             #Epsilon greedy policy to enforce strict exploration
-            action = jax.lax.cond(eps_prob>=0.1, lambda: action_policy, lambda: random_action)
+            action = jax.lax.cond(eps_prob>=0.05, lambda: action_policy, lambda: random_action)
             log_prob = actor_policy.log_prob(action)
 
             # STEP ENVIRONMENT
@@ -255,7 +255,7 @@ def get_learner_fn(
                         log_prob, traj_batch.log_prob, gae, config.system.clip_eps
                     )
 
-                    kl_rough_estimate = (log_prob-traj_batch.log_prob).mean()
+                    kl_rough_estimate = (jnp.abs(log_prob-traj_batch.log_prob)).mean()
 
                     entropy = actor_policy.entropy(seed=rng_key).mean()
 
