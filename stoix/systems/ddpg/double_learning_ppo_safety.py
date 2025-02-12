@@ -203,7 +203,7 @@ def log_training_metrics_performance_training(config_p,config_s, elapsed_time, e
     eval_step = eval_step_perf+eval_step_safety
     episode_metrics, ep_completed = get_final_step_metrics(perf_learner_output.episode_metrics)
     episode_metrics["steps_per_second"] = config_p.system.steps_per_rollout / elapsed_time
-
+    episode_metrics["count_failures"] = jnp.sum(episode_metrics["episode_length"]!=500)
     # Separately log timesteps, actoring metrics and training metrics.
     logger.log({"timestep": t}, t, eval_step, LogEvent.MISC_Perf)
     if ep_completed:  # only log episode metrics if an episode was completed in the rollout.
@@ -239,6 +239,7 @@ def log_evaluation_metrics_performance_agent_greedy(config_s,config_p, elapsed_t
     t = int(config_p.system.steps_per_rollout * (eval_step_perf + 1)) + int(config_s.system.steps_per_rollout * (eval_step_safety + 1))
     eval_step = eval_step_perf+eval_step_safety
     steps_per_eval = int(jnp.sum(perf_evaluator_output.episode_metrics["episode_length"]))
+    perf_evaluator_output.episode_metrics["count_failures"] = jnp.sum(perf_evaluator_output.episode_metrics["episode_length"]!=500)
     perf_evaluator_output.episode_metrics["steps_per_second"] = steps_per_eval / elapsed_time
     logger.log(perf_evaluator_output.episode_metrics, t, eval_step, LogEvent.EVAL_Perf_Greed)
 
@@ -570,7 +571,7 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
                 maximal_actions_taken_safety.append(all_action_taken_safety[0][argmax_eval_index].tolist())
                 perf_eval_best_reward = result_best_local
 
-            if perf_evaluator_output.episode_metrics["episode_length"].mean() >=config_s.env.solved_return_threshold:
+            if perf_evaluator_output.episode_metrics["episode_length"].mean() >=config_s.env.solved_return_threshold-10:
                 safety_assured_counter+=1
                 all_filter_factors = perf_evaluator_output.filter_factor[0]
                 max_filter_indices = jnp.argmax(all_filter_factors, axis=1)
