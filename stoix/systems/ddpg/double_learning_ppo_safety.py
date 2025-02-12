@@ -713,12 +713,12 @@ def run_experiment(_config_s: DictConfig, _config_p: DictConfig, iteration_index
         perf_learner_state = perf_learner_output.learner_state
     # Stop the logger.
     #Safe the trajectories for later videos
-    with open(f"DetStartingStates_0.6Eval200-Run{iteration_index}.pkl", "wb") as file:
-        pickle.dump(maximal_trajectories, file)
-    with open(f"DetStartingStates_0.6Eval200-Run{iteration_index}.pkl", "wb") as file:
-        pickle.dump(maximal_actions_taken_performance, file)
-    with open(f"DetStartingStates_0.6Eval200-Run{iteration_index}.pkl", "wb") as file:
-        pickle.dump(maximal_actions_taken_safety, file)
+        with open(f"RelaxedDetStartingStates_0.0Eval200-Run{iteration_index}-traj.pkl", "wb") as file:
+            pickle.dump(maximal_trajectories, file)
+        with open(f"RelaxedDetStartingStates_0.0Eval200-Run{iteration_index}-perf_actions.pkl", "wb") as file:
+            pickle.dump(maximal_actions_taken_performance, file)
+        with open(f"RelaxedDetStartingStates_0.0Eval200-Run{iteration_index}-actions_safe.pkl", "wb") as file:
+            pickle.dump(maximal_actions_taken_safety, file)
    #uploadVideos()#f"AblationBonusDoubleLearningJaxCartpole_Bonus{bonus},_{i}_Videos")
     logger.stop()
     return eval_step_safety
@@ -756,7 +756,7 @@ def hydra_entry_point(cfg: DictConfig) -> float:
         # Run experiment.
         #jax.debug.breakpoint()
         #cfg_safety.env.kwargs.bonus = bonus
-        cfg_safety.logger.kwargs.name =f"DetStartingStates_0.6Eval200-Run{i}"
+        cfg_safety.logger.kwargs.name =f"RelaxedDetStartingStates_0.6Eval200-Run{i}"
         eval_performance = run_experiment(cfg_safety, cfg_performance,i)
         print(f"It took {eval_performance} Iterations to learn safety")
         print(f"{Fore.CYAN}{Style.BRIGHT}Double Learning experiment completed{Style.RESET_ALL}")
